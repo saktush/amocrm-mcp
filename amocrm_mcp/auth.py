@@ -78,7 +78,10 @@ class AuthManager:
             os.replace(tmp_path, str(self._token_file))
             logger.info("Persisted tokens to %s", self._token_file)
         except BaseException:
-            os.close(fd) if not os.get_inheritable(fd) else None
+            try:
+                os.close(fd)
+            except OSError:
+                pass
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise

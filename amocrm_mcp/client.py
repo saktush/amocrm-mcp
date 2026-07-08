@@ -164,7 +164,11 @@ class AmoClient:
 
         if response.status_code == 200 or response.status_code == 202:
             data = response.json()
-            return normalize_response(data)
+            has_next = isinstance(data, dict) and "next" in data.get("_links", {})
+            normalized = normalize_response(data)
+            if isinstance(normalized, dict):
+                normalized["_has_next"] = has_next
+            return normalized
 
         return response.json()
 
@@ -236,6 +240,8 @@ def success_response(data: Any, pagination: dict | None = None) -> dict:
 
     Returns {data, pagination} for list operations or {data} for single entities.
     """
+    if isinstance(data, dict):
+        data.pop("_has_next", None)
     envelope: dict[str, Any] = {"data": data}
     if pagination is not None:
         envelope["pagination"] = pagination

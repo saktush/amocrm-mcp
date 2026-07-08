@@ -53,7 +53,7 @@ async def analytics_get_events(input: AnalyticsGetEventsInput) -> dict:
         events = data.get("events", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(events, pagination)
 
@@ -139,7 +139,7 @@ async def analytics_get_pipeline_analytics(
             )
             leads = data.get("leads", [])
             all_leads.extend(leads)
-            has_next = "next" in data if isinstance(data, dict) else False
+            has_next = data.get("_has_next", False) if isinstance(data, dict) else False
             page += 1
 
         groups: dict[str, int] = defaultdict(int)

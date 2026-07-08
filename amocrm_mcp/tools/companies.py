@@ -68,7 +68,7 @@ async def companies_search(input: CompaniesSearchInput) -> dict:
         companies = data.get("companies", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(companies, pagination)
 

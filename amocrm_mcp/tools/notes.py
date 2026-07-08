@@ -49,7 +49,7 @@ async def notes_list(input: NotesListInput) -> dict:
         notes = data.get("notes", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(notes, pagination)
 

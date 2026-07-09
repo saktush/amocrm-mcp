@@ -109,7 +109,13 @@ async def _async_main() -> None:
     )
 
     try:
-        if config.transport == "sse":
+        if config.transport == "http":
+            await mcp.run_http_async(
+                transport="http",
+                host="0.0.0.0",
+                port=config.port,
+            )
+        elif config.transport == "sse":
             await mcp.run_http_async(
                 transport="sse",
                 host="0.0.0.0",

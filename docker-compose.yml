@@ -1,0 +1,24 @@
+services:
+  amocrm-mcp:
+    build: .
+    image: amocrm-mcp:latest
+    container_name: amocrm-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AMO_TRANSPORT: http
+      AMO_PORT: ${AMO_PORT:-8000}
+      AMO_TOKEN_FILE: /data/.amo_tokens.json
+    ports:
+      - "${AMO_PORT:-8000}:${AMO_PORT:-8000}"
+    volumes:
+      - amo_tokens:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  amo_tokens:

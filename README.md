@@ -45,13 +45,15 @@ For automatic token refresh, also set:
 python -m amocrm_mcp
 ```
 
-**On a server** (headless, accessed remotely), use the SSE transport instead of stdio:
+**On a server** (headless, accessed remotely), use the Streamable HTTP transport instead of stdio:
 
 ```bash
-AMO_TRANSPORT=sse AMO_PORT=8000 python -m amocrm_mcp
+AMO_TRANSPORT=http AMO_PORT=8000 python -m amocrm_mcp
 ```
 
-Then point any MCP client that supports SSE/HTTP transports at `http://<server-host>:8000`. Run it under a process supervisor (systemd, `tmux`, `supervisord`, etc.) so it survives disconnects.
+Then point any MCP client that supports Streamable HTTP at `http://<server-host>:8000/mcp`. Run it under a process supervisor (systemd, `tmux`, `supervisord`, etc.) so it survives disconnects. A legacy `AMO_TRANSPORT=sse` mode is also available (`http://<server-host>:8000/sse`) for older clients, but Streamable HTTP is the modern standard and the only transport OpenAI Codex supports remotely — prefer `http` unless a specific client requires SSE.
+
+For a network-reachable deployment via Docker (any Linux server or Docker Desktop) — including step-by-step instructions for connecting Claude, Codex, and Cursor to a remote server — see [README-deploy.md](README-deploy.md).
 
 > **Important:** every client below spawns the server as a subprocess with its own restricted `PATH` — it will **not** find a bare `python` on `$PATH` the way your shell does. Always give clients the **absolute path** to this project's venv interpreter, e.g. `/absolute/path/to/amocrm-mcp/.venv/bin/python`. Using a bare `"python"` command is the most common cause of a client reporting `Failed to spawn process: No such file or directory`.
 

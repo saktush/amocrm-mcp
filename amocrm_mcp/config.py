@@ -7,7 +7,11 @@ from pydantic_settings import BaseSettings
 class Config(BaseSettings):
     """Environment-based configuration for amoCRM MCP server (FR-1, ADR-006)."""
 
-    model_config = {"env_prefix": "AMO_"}
+    model_config = {
+        "env_prefix": "AMO_",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+    }
 
     subdomain: str = Field(description="amoCRM account subdomain")
     client_id: str = Field(default="", description="OAuth client ID")
@@ -18,9 +22,12 @@ class Config(BaseSettings):
         default=".amo_tokens.json",
         description="Path for token persistence file",
     )
-    transport: str = Field(default="stdio", description="Transport protocol: stdio or sse")
+    transport: str = Field(
+        default="stdio",
+        description="Transport protocol: stdio, http (Streamable HTTP), or sse (legacy)",
+    )
     port: int = Field(default=8000, description="Port for SSE transport")
 
     @property
     def base_url(self) -> str:
-        return f"https://{self.subdomain}.amocrm.ru/api/v4"
+        return f"https://{self.subdomain}.amocrm.ru"

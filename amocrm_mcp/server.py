@@ -91,14 +91,14 @@ async def _async_main() -> None:
 
     import amocrm_mcp.tools  # noqa: F401 -- triggers @mcp.tool() registration
 
-    registered_tools = await mcp.get_tools()
+    registered_tools = await mcp.list_tools()
     tool_count = len(registered_tools)
     if tool_count != EXPECTED_TOOL_COUNT:
         logger.error(
             "Expected %d tools registered, got %d. Registered: %s",
             EXPECTED_TOOL_COUNT,
             tool_count,
-            sorted(registered_tools.keys()),
+            sorted(tool.name for tool in registered_tools),
         )
         sys.exit(1)
 
@@ -109,7 +109,13 @@ async def _async_main() -> None:
     )
 
     try:
-        if config.transport == "sse":
+        if config.transport == "http":
+            await mcp.run_http_async(
+                transport="http",
+                host="0.0.0.0",
+                port=config.port,
+            )
+        elif config.transport == "sse":
             await mcp.run_http_async(
                 transport="sse",
                 host="0.0.0.0",

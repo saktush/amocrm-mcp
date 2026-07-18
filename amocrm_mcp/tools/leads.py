@@ -57,7 +57,7 @@ async def leads_list(input: LeadsListInput) -> dict:
         leads = data.get("leads", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(leads, pagination)
 
@@ -155,7 +155,7 @@ async def leads_search(input: LeadsSearchInput) -> dict:
         leads = data.get("leads", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(leads, pagination)
 

@@ -35,7 +35,7 @@ async def unsorted_list(input: UnsortedListInput) -> dict:
         unsorted = data.get("unsorted", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(unsorted, pagination)
 

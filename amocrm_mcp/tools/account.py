@@ -41,7 +41,7 @@ async def account_list_users(input: AccountListUsersInput) -> dict:
         users = data.get("users", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(users, pagination)
 
@@ -62,7 +62,7 @@ async def account_list_custom_fields(input: AccountListCustomFieldsInput) -> dic
         custom_fields = data.get("custom_fields", [])
         pagination = {
             "current_page": input.page,
-            "has_next": "next" in data if isinstance(data, dict) else False,
+            "has_next": data.get("_has_next", False) if isinstance(data, dict) else False,
         }
         return success_response(custom_fields, pagination)
 

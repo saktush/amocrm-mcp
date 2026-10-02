@@ -1,197 +1,199 @@
-# Docker Deployment Guide (Streamable HTTP / network mode)
+# Развёртывание в Docker (Streamable HTTP / сетевой режим)
 
-This guide covers running the amoCRM MCP server in Docker — either on your local machine with **Docker Desktop**, or on **any Linux server**. The container runs the server in **Streamable HTTP transport mode**, so it can be reached over the network by Claude, Codex, Cursor, and any other MCP client that supports Streamable HTTP (the modern standard transport for remote MCP servers, and the only one OpenAI Codex supports).
+🌐 **Русский** | [English](README-deploy.en.md)
 
-For the tool list, credential setup, and native (non-Docker) stdio usage with desktop clients like Claude Desktop, see the main [README.md](README.md).
+Это руководство описывает запуск amoCRM MCP-сервера в Docker — на локальной машине через **Docker Desktop** или на **любом Linux-сервере**. Контейнер запускает сервер в режиме транспорта **Streamable HTTP**, поэтому к нему можно подключаться по сети из Claude, Codex, Cursor и любого другого MCP-клиента с поддержкой Streamable HTTP (современный стандартный транспорт для удалённых MCP-серверов и единственный, который поддерживает OpenAI Codex).
 
-## Prerequisites
+Список инструментов, получение доступов и нативный запуск без Docker (stdio) с десктопными клиентами вроде Claude Desktop описаны в основном [README.md](README.md).
 
-- Docker Engine 24+ (Linux) or Docker Desktop (macOS/Windows), with the Compose v2 plugin (`docker compose`, bundled with both by default).
-- An amoCRM (Kommo) OAuth access token, subdomain, and optionally client ID/secret + refresh token — see [Getting amoCRM Credentials](README.md#getting-amocrm-credentials) in the main README.
+## Требования
 
-## Quick Start
+- Docker Engine 24+ (Linux) или Docker Desktop (macOS/Windows) с плагином Compose v2 (`docker compose`, входит в оба по умолчанию).
+- Поддомен amoCRM (Kommo) и данные OAuth-интеграции (ID, секретный ключ), либо долгоживущий токен — см. [Получение данных для доступа к amoCRM](README.md#получение-данных-для-доступа-к-amocrm) в основном README.
+
+## Быстрый старт
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and fill in at minimum:
+Отредактируйте `.env` и заполните как минимум:
 
-- `AMO_SUBDOMAIN` — your amoCRM account subdomain
-- `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REDIRECT_URI` — from the integration's **Keys and access** tab (the redirect URI must match the integration exactly)
+- `AMO_SUBDOMAIN` — поддомен вашего аккаунта amoCRM
+- `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REDIRECT_URI` — со вкладки **Ключи и доступы** интеграции (redirect URI должен точно совпадать с указанным в интеграции)
 
-Then get the first token pair once, writing it into the persistent volume (use the authorization code from the **Keys and access** tab, valid 20 minutes, single use):
+Затем один раз получите первую пару токенов, записав её в постоянный том (используйте код авторизации со вкладки **Ключи и доступы**: действует 20 минут, одноразовый):
 
 ```bash
-docker compose run --rm amocrm-mcp amocrm-mcp-auth --code <authorization code>
+docker compose run --rm amocrm-mcp amocrm-mcp-auth --code <код авторизации>
 ```
 
-The tokens land in `/data/.amo_tokens.json` (the `amo_tokens` volume) and are refreshed automatically afterwards. Alternatively, skip this and set a long-lived `AMO_ACCESS_TOKEN` (it will never refresh).
+Токены сохранятся в `/data/.amo_tokens.json` (том `amo_tokens`) и дальше будут обновляться автоматически. Можно пропустить этот шаг и задать долгоживущий `AMO_ACCESS_TOKEN` (он никогда не обновляется).
 
-> Note: `docker-compose.yml` always runs the container in `http` (Streamable HTTP) transport mode regardless of what `AMO_TRANSPORT` is set to in `.env` — this is required for the container to be reachable over the network at all.
+> Примечание: `docker-compose.yml` всегда запускает контейнер в транспорте `http` (Streamable HTTP), независимо от значения `AMO_TRANSPORT` в `.env` — иначе контейнер вообще не был бы доступен по сети.
 
-Build and start:
+Соберите и запустите:
 
 ```bash
 docker compose up -d --build
 ```
 
-Confirm it started cleanly:
+Убедитесь, что запуск прошёл чисто:
 
 ```bash
 docker compose logs -f
 ```
 
-You should see a line like:
+Вы должны увидеть строку вида:
 
 ```
 amoCRM MCP server started with 36 tools on http transport
 ```
 
-## Configuration Reference
+## Справочник по конфигурации
 
-| Variable | Required? | Default | Notes |
+| Переменная | Обязательна? | По умолчанию | Примечания |
 |---|---|---|---|
-| `AMO_SUBDOMAIN` | **Yes** | — | amoCRM account subdomain. Missing this crashes the container at startup. |
-| `AMO_ACCESS_TOKEN` | If no token file | `""` | Initial access token (seed). Not needed once `amocrm-mcp-auth` has written `/data/.amo_tokens.json`. |
-| `AMO_CLIENT_ID` | For OAuth / auto-refresh | `""` | OAuth client ID |
-| `AMO_CLIENT_SECRET` | For OAuth / auto-refresh | `""` | OAuth client secret |
-| `AMO_REFRESH_TOKEN` | No | `""` | Refresh token seed; normally created by `amocrm-mcp-auth` instead |
-| `AMO_BASE_DOMAIN` | No | `amocrm.ru` | Platform domain (`amocrm.ru`, `amocrm.com` or `kommo.com`). Used for both API calls (`https://<subdomain>.<domain>`) and OAuth token refresh. |
-| `AMO_REDIRECT_URI` | No | `https://localhost` | OAuth redirect URI used on token refresh; must match the integration settings exactly. |
-| `AMO_MAX_BATCH_SIZE` | No | `50` | Max items per `batch_*` call; values above the amoCRM limit of `250` are clamped to `250`. |
-| `AMO_TOKEN_FILE` | No | Fixed to `/data/.amo_tokens.json` by Docker setup | Where refreshed tokens are persisted. Overridable, but must point inside `/data` to survive container recreation. |
-| `AMO_TRANSPORT` | No | Fixed to `http` by Docker setup | Streamable HTTP (modern standard, required by Codex). `sse` (legacy) is also available — see [Advanced: stdio](#advanced-stdio-inside-a-container-discouraged) for how to override. |
-| `AMO_PORT` | No | `8000` | Also controls the published host port (`docker-compose.yml` maps `${AMO_PORT}:${AMO_PORT}`). |
+| `AMO_SUBDOMAIN` | **Да** | — | Поддомен аккаунта amoCRM. Без него контейнер падает при запуске. |
+| `AMO_ACCESS_TOKEN` | Если нет файла токенов | `""` | Начальный access-токен (затравка). Не нужен, когда `amocrm-mcp-auth` уже записал `/data/.amo_tokens.json`. |
+| `AMO_CLIENT_ID` | Для OAuth / автообновления | `""` | ID OAuth-интеграции |
+| `AMO_CLIENT_SECRET` | Для OAuth / автообновления | `""` | Секретный ключ OAuth-интеграции |
+| `AMO_REFRESH_TOKEN` | Нет | `""` | Затравка refresh-токена; обычно его создаёт `amocrm-mcp-auth` |
+| `AMO_BASE_DOMAIN` | Нет | `amocrm.ru` | Домен платформы (`amocrm.ru`, `amocrm.com` или `kommo.com`). Используется и для запросов к API (`https://<поддомен>.<домен>`), и для обновления OAuth-токена. |
+| `AMO_REDIRECT_URI` | Нет | `https://localhost` | Redirect URI для OAuth, используется при обновлении токена; должен точно совпадать с настройками интеграции. |
+| `AMO_MAX_BATCH_SIZE` | Нет | `50` | Максимум элементов в одном вызове `batch_*`; значения выше лимита amoCRM (`250`) приводятся к `250`. |
+| `AMO_TOKEN_FILE` | Нет | Зафиксирован `/data/.amo_tokens.json` настройками Docker | Где сохраняются обновлённые токены. Можно переопределить, но путь должен быть внутри `/data`, чтобы токены пережили пересоздание контейнера. |
+| `AMO_TRANSPORT` | Нет | Зафиксирован `http` настройками Docker | Streamable HTTP (современный стандарт, требуется Codex). `sse` (устаревший) тоже доступен — как его включить, см. [Дополнительно: stdio внутри контейнера](#дополнительно-stdio-внутри-контейнера-не-рекомендуется). |
+| `AMO_PORT` | Нет | `8000` | Также определяет публикуемый порт хоста (`docker-compose.yml` пробрасывает `${AMO_PORT}:${AMO_PORT}`). |
 
-## Connecting an MCP Client
+## Подключение MCP-клиента
 
-The server is reachable at:
+Сервер доступен по адресу:
 
 ```
-http://<host>:<AMO_PORT>/mcp
+http://<хост>:<AMO_PORT>/mcp
 ```
 
-- `<host>` is `localhost` for a local Docker Desktop setup, or the server's hostname/IP for a remote Linux deployment.
-- Note the **`/mcp`** path suffix — FastMCP's Streamable HTTP endpoint is not served at the bare host:port.
-- Only MCP clients that support **Streamable HTTP** (or legacy SSE — see below) can connect to a containerized deployment. Stdio-based clients (e.g. Claude Desktop's default `claude_desktop_config.json` entries) need the native `.venv` setup described in the main [README.md](README.md) instead.
+- `<хост>` — `localhost` для локального Docker Desktop или имя хоста/IP сервера для удалённого Linux-развёртывания.
+- Обратите внимание на суффикс **`/mcp`**: эндпоинт Streamable HTTP в FastMCP не отдаётся по голому host:port.
+- К контейнеру можно подключиться только MCP-клиентом с поддержкой **Streamable HTTP** (или устаревшего SSE — см. ниже). Клиентам на stdio (например, стандартные записи `claude_desktop_config.json` в Claude Desktop) нужна нативная установка через `.venv`, описанная в основном [README.md](README.md).
 
-**Security note:** there is no transport-level authentication beyond the amoCRM tokens the server holds internally. Do not expose `0.0.0.0:<port>` directly to the public internet on a Linux server — put it behind a VPN/private network, or a TLS-terminating reverse proxy (nginx, Caddy, Traefik).
+**Безопасность:** помимо токенов amoCRM, которые сервер хранит внутри, аутентификации на уровне транспорта нет. Не открывайте `0.0.0.0:<порт>` напрямую в публичный интернет на Linux-сервере — разместите его за VPN/частной сетью или за обратным прокси с TLS (nginx, Caddy, Traefik).
 
 ### Claude Desktop
 
-`claude_desktop_config.json` only supports stdio servers — you cannot add a remote URL there. Instead, add it as a **custom connector**:
+`claude_desktop_config.json` поддерживает только stdio-серверы — добавить туда удалённый URL нельзя. Вместо этого добавьте сервер как **пользовательский коннектор**:
 
-1. Open Claude Desktop → **Settings → Connectors → Add custom connector**.
-2. Enter the URL: `http://<host>:<AMO_PORT>/mcp`
-3. Save. Claude Desktop connects over Streamable HTTP directly — no JSON editing needed.
+1. Откройте Claude Desktop → **Settings → Connectors → Add custom connector**.
+2. Введите URL: `http://<хост>:<AMO_PORT>/mcp`
+3. Сохраните. Claude Desktop подключится напрямую по Streamable HTTP — править JSON не нужно.
 
 ### Claude Code (CLI)
 
 ```bash
-claude mcp add --transport http amocrm http://<host>:8000/mcp
+claude mcp add --transport http amocrm http://<хост>:8000/mcp
 ```
 
-Add `-s user` to make it available in every project instead of just the current one. (`--transport sse` also works against the legacy `/sse` endpoint if you've overridden `AMO_TRANSPORT=sse`, but `http` is recommended.)
+Добавьте `-s user`, чтобы сервер был доступен во всех проектах, а не только в текущем. (`--transport sse` тоже работает с устаревшим эндпоинтом `/sse`, если вы переопределили `AMO_TRANSPORT=sse`, но рекомендуется `http`.)
 
 ### Codex (CLI / Desktop)
 
-Codex **only** supports stdio and Streamable HTTP for MCP servers — it does not support SSE. Edit `~/.codex/config.toml`:
+Codex поддерживает для MCP-серверов **только** stdio и Streamable HTTP — SSE не поддерживается. Отредактируйте `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.amocrm]
-url = "http://<host>:8000/mcp"
+url = "http://<хост>:8000/mcp"
 ```
 
 ### Cursor
 
-Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` in the project (project-scoped):
+Добавьте в `~/.cursor/mcp.json` (глобально) или `.cursor/mcp.json` в проекте (для одного проекта):
 
 ```json
 {
   "mcpServers": {
     "amocrm": {
-      "url": "http://<host>:8000/mcp"
+      "url": "http://<хост>:8000/mcp"
     }
   }
 }
 ```
 
-You can also do this from the UI: **Settings → MCP → Add new global MCP server**, which edits the same file.
+То же можно сделать из интерфейса: **Settings → MCP → Add new global MCP server** — это правит тот же файл.
 
-### Legacy SSE clients
+### Клиенты со старым SSE
 
-If a client only supports the older SSE transport (not Streamable HTTP), you need to override `AMO_TRANSPORT`. Setting a shell environment variable before `docker compose up` has **no effect** — `docker-compose.yml` sets `AMO_TRANSPORT: http` as a fixed value, not a `${AMO_TRANSPORT}` substitution, specifically so a stray `AMO_TRANSPORT=stdio` left in `.env` (the `.env.example` default) can't accidentally break the network deployment.
+Если клиент поддерживает только старый транспорт SSE (не Streamable HTTP), нужно переопределить `AMO_TRANSPORT`. Переменная окружения оболочки, заданная перед `docker compose up`, **не действует**: в `docker-compose.yml` указано фиксированное `AMO_TRANSPORT: http`, а не подстановка `${AMO_TRANSPORT}`. Это сделано намеренно, чтобы случайно оставленное в `.env` значение `AMO_TRANSPORT=stdio` (по умолчанию в `.env.example`) не сломало сетевое развёртывание.
 
-- **One-off test**, without touching `docker-compose.yml`:
+- **Разовая проверка**, без правки `docker-compose.yml`:
   ```bash
   docker compose run --rm -e AMO_TRANSPORT=sse -p 8000:8000 amocrm-mcp
   ```
-- **Persistent SSE deployment**: edit `docker-compose.yml` and change `AMO_TRANSPORT: http` to `AMO_TRANSPORT: sse` under the service's `environment:` key, then `docker compose up -d --build`.
+- **Постоянное SSE-развёртывание**: в `docker-compose.yml` замените `AMO_TRANSPORT: http` на `AMO_TRANSPORT: sse` в блоке `environment:` сервиса и выполните `docker compose up -d --build`.
 
-Either way, connect the client to `http://<host>:8000/sse` instead of `/mcp`. SSE is being phased out across the MCP ecosystem in favor of Streamable HTTP, so prefer `/mcp` unless a specific client requires it.
+В обоих случаях подключайте клиент к `http://<хост>:8000/sse`, а не к `/mcp`. SSE постепенно выводится из экосистемы MCP в пользу Streamable HTTP, поэтому используйте `/mcp`, если нет особой причины.
 
-## Persistent Token Storage
+## Постоянное хранение токенов
 
-Refreshed OAuth tokens are written to `/data/.amo_tokens.json` inside the container, which is backed by the `amo_tokens` named Docker volume declared in `docker-compose.yml`. This is what lets refreshed tokens survive container restarts/recreation — without it, the server would fall back to the (possibly stale) env-seeded tokens every time the container is recreated (and a rotated, single-use refresh token would be lost).
+Обновлённые OAuth-токены записываются в `/data/.amo_tokens.json` внутри контейнера; он размещён на именованном томе Docker `amo_tokens`, объявленном в `docker-compose.yml`. Благодаря этому токены переживают перезапуск и пересоздание контейнера. Без тома сервер при каждом пересоздании контейнера возвращался бы к (возможно, устаревшим) токенам из окружения, а ротированный одноразовый refresh-токен был бы потерян.
 
-To inspect the persisted token file:
+Посмотреть сохранённый файл токенов:
 
 ```bash
 docker compose exec amocrm-mcp cat /data/.amo_tokens.json
 ```
 
-**`docker compose down -v` deletes this volume** (and the persisted tokens) — use plain `docker compose down` (no `-v`) if you want to keep them.
+**`docker compose down -v` удаляет этот том** (и сохранённые токены) — если токены нужно сохранить, используйте обычный `docker compose down` без `-v`.
 
-If you'd prefer the token file to be directly visible on the host filesystem instead of inside a named volume, you can swap the `amo_tokens:/data` volume mapping for a bind mount (e.g. `./data:/data`). On a native Linux host you'll then need to `chown 1000:1000 ./data` first, since the container runs as uid 1000 and bind mounts keep host-side ownership (unlike named volumes, which Docker manages internally).
+Если нужно, чтобы файл токенов был виден прямо в файловой системе хоста, замените том `amo_tokens:/data` на bind mount (например, `./data:/data`). На нативном Linux-хосте тогда сначала выполните `chown 1000:1000 ./data`: контейнер работает под uid 1000, а bind mount сохраняет владельца на стороне хоста (в отличие от именованных томов, которыми управляет сам Docker).
 
-## Viewing Logs
+## Просмотр логов
 
 ```bash
 docker compose logs -f amocrm-mcp
 ```
 
-The app logs to stderr, which Docker captures the same as stdout — no extra configuration needed.
+Приложение пишет логи в stderr, который Docker собирает так же, как stdout, — дополнительная настройка не нужна.
 
-## Updating / Rebuilding
+## Обновление / пересборка
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-Images aren't pushed to a registry in this setup — each host rebuilds from source.
+В этой схеме образы не публикуются в реестр — каждый хост собирает их из исходников.
 
-## Running on a Remote Linux Server
+## Запуск на удалённом Linux-сервере
 
-The exact same commands as above work unchanged on any Linux server, since Compose files are portable. The only Linux-specific setup steps are:
+Все команды выше работают без изменений на любом Linux-сервере, так как Compose-файлы переносимы. Дополнительные шаги только для Linux:
 
-1. Install Docker Engine and the Compose plugin (official convenience script or your distro's packages).
-2. Open the chosen port in your firewall / cloud security group, e.g.:
+1. Установите Docker Engine и плагин Compose (официальный скрипт установки или пакеты вашего дистрибутива).
+2. Откройте выбранный порт в файрволе / группе безопасности облака, например:
    ```bash
    sudo ufw allow 8000/tcp
    ```
 
-## Advanced: stdio Inside a Container (discouraged)
+## Дополнительно: stdio внутри контейнера (не рекомендуется)
 
-Running the server in `stdio` mode inside a container is possible but not a normal MCP workflow — it ties the container's lifecycle to a client subprocess model it wasn't designed for, and adds startup latency. If you need this:
+Запускать сервер в режиме `stdio` внутри контейнера можно, но это нетипичный для MCP сценарий: он привязывает жизненный цикл контейнера к модели подпроцесса клиента, на которую контейнер не рассчитан, и увеличивает время запуска. Если это всё же нужно:
 
 ```bash
 docker compose run --rm -i -e AMO_TRANSPORT=stdio amocrm-mcp
 ```
 
-(`-i` keeps stdin open, which stdio transport requires — without it the client has nothing to write to.)
+(`-i` оставляет stdin открытым, а он нужен транспорту stdio — без него клиенту некуда писать.)
 
-For local desktop-client use (Claude Desktop, Cursor, etc.), prefer the native `.venv` + stdio setup documented in the main [README.md](README.md) instead — it's simpler and is what those clients expect.
+Для локальных десктопных клиентов (Claude Desktop, Cursor и т. д.) лучше использовать нативную установку `.venv` + stdio из основного [README.md](README.md): она проще и именно её ожидают эти клиенты.
 
-## Troubleshooting
+## Устранение неполадок
 
-- **Container exits immediately, logs show a pydantic `ValidationError` mentioning `subdomain` or `access_token`** — `AMO_SUBDOMAIN` is missing from `.env`, or `docker compose` was run from a directory where `.env` isn't next to `docker-compose.yml`.
-- **`docker compose ps` shows `unhealthy`** — expected/cosmetic if you've overridden `AMO_TRANSPORT=stdio` (the healthcheck probes the HTTP port, which isn't bound in stdio mode). Plain Docker does not restart containers based on health status alone.
-- **Codex reports it can't connect / only stdio and Streamable HTTP are supported** — make sure you're using the default `AMO_TRANSPORT=http` (not `sse`) and the URL ends in `/mcp`, not `/sse`. Codex does not support the legacy SSE transport at all.
-- **MCP client reports "connection refused"** — check `docker compose ps` shows `Up`, confirm the published port matches `AMO_PORT`, and check the host firewall.
-- **Refreshed tokens aren't persisting across restarts** — confirm `AMO_TOKEN_FILE` still points inside `/data` (the volume mount point); if you overrode it elsewhere, it won't survive container recreation.
+- **Контейнер сразу завершается, в логах pydantic `ValidationError` про `subdomain` или `access_token`** — в `.env` нет `AMO_SUBDOMAIN`, либо `docker compose` запущен из каталога, где `.env` не лежит рядом с `docker-compose.yml`.
+- **`docker compose ps` показывает `unhealthy`** — ожидаемо и безвредно, если вы переопределили `AMO_TRANSPORT=stdio` (проверка здоровья обращается к HTTP-порту, который в режиме stdio не открыт). Обычный Docker не перезапускает контейнеры только из-за статуса health.
+- **Codex сообщает, что не может подключиться / поддерживаются только stdio и Streamable HTTP** — убедитесь, что используется `AMO_TRANSPORT=http` по умолчанию (не `sse`), а URL заканчивается на `/mcp`, а не на `/sse`. Codex вообще не поддерживает устаревший транспорт SSE.
+- **MCP-клиент сообщает «connection refused»** — проверьте, что `docker compose ps` показывает `Up`, что публикуемый порт совпадает с `AMO_PORT`, и проверьте файрвол хоста.
+- **Обновлённые токены не сохраняются между перезапусками** — убедитесь, что `AMO_TOKEN_FILE` по-прежнему указывает внутрь `/data` (точка монтирования тома); если вы переопределили путь, токены не переживут пересоздание контейнера.
 
-## See Also
+## См. также
 
-- [README.md](README.md) — full tool list, credential setup, and native stdio usage with Claude Desktop / Claude Code / Codex / Cursor.
+- [README.md](README.md) — полный список инструментов, получение доступов и нативный запуск через stdio с Claude Desktop / Claude Code / Codex / Cursor.

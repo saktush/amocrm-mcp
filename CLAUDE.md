@@ -38,3 +38,5 @@ Things that span files:
 `AMOCRM_API_AUDIT.md` records the audit of the tools against the official amoCRM API docs. Its P1/P2 defects were fixed on `fix/api-audit-p1-p2`; the remaining items (section 3 gaps, section 4 new tools) are still open. Check it before changing query-building code.
 
 Source comments cite internal requirement IDs (FR-n, ADR-n, C-n) that are not defined in this repo.
+
+Docs are bilingual: `README.md` and `README-deploy.md` are Russian (primary); `README.en.md` and `README-deploy.en.md` are the English versions, linked to each other at the top. Update both languages together.

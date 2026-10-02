@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased (branch `fix/api-audit-p1-p2`)
+## Unreleased
+
+- Docs: `README.md` / `README-deploy.md` are now Russian, with English versions in `README.en.md` / `README-deploy.en.md`.
+
+## 0.2.0 (2026-10-02)
 
 Fixes from the API audit (`AMOCRM_API_AUDIT.md`), verified against a live dev account.
 

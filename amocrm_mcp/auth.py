@@ -31,6 +31,9 @@ class AuthManager:
     Manages access/refresh tokens with disk persistence and automatic refresh.
     The token file on disk is the canonical source of truth for tokens.
     Environment variables serve only as the initial seed.
+
+    Two modes: OAuth (a refresh token plus client ID/secret exist, so a 401 triggers a
+    refresh) and long-lived (no refresh token: a 401 is reported, never refreshed).
     """
 
     def __init__(self, config: Config) -> None:
@@ -39,7 +42,26 @@ class AuthManager:
         self._refresh_token_value: str = config.refresh_token
         self._token_file = Path(config.token_file)
         self._refresh_lock = asyncio.Lock()
+        self.token_source = "env"
         self._load_persisted_tokens()
+        self._log_mode(config.access_token)
+
+    @property
+    def can_refresh(self) -> bool:
+        """True when a refresh token and client credentials are available."""
+        return bool(
+            self._refresh_token_value and self._config.client_id and self._config.client_secret
+        )
+
+    def _log_mode(self, env_access_token: str) -> None:
+        mode = "OAuth (auto-refresh)" if self.can_refresh else "static/long-lived (no refresh)"
+        logger.info("Auth: tokens from %s, mode: %s", self.token_source, mode)
+        if self.token_source == "token file" and env_access_token and env_access_token != self._access_token:
+            logger.warning(
+                "AMO_ACCESS_TOKEN is set but token file %s takes precedence and is being used; "
+                "remove AMO_ACCESS_TOKEN or delete the file to use the env token",
+                self._token_file,
+            )
 
     def _load_persisted_tokens(self) -> None:
         """Load tokens from disk if the file exists and contains valid JSON.
@@ -56,6 +78,7 @@ class AuthManager:
             if access and refresh:
                 self._access_token = access
                 self._refresh_token_value = refresh
+                self.token_source = "token file"
                 logger.info("Loaded persisted tokens from %s", self._token_file)
             else:
                 logger.warning("Token file %s missing required fields, using env seed", self._token_file)
@@ -102,6 +125,12 @@ class AuthManager:
         On success, persists new tokens to disk.
         On invalid_grant (expired refresh token), raises RefreshTokenExpiredError.
         """
+        if not self.can_refresh:
+            raise AuthError(
+                "Access token was rejected (401) and cannot be refreshed: no refresh token or client "
+                "credentials are configured (long-lived token mode). Replace the token, or set "
+                "AMO_CLIENT_ID/AMO_CLIENT_SECRET and run amocrm-mcp-auth."
+            )
         async with self._refresh_lock:
             if stale_token is not None and stale_token != self._access_token:
                 logger.info("Token already refreshed by a concurrent request, skipping")

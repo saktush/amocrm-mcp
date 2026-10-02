@@ -19,7 +19,7 @@ amocrm-mcp-auth --code <code>        # one-time OAuth bootstrap: writes tokens t
 docker compose up --build             # containerized HTTP deployment (see README-deploy.md)
 ```
 
-Config is read from env vars prefixed `AMO_` (and a `.env` in the CWD) via `amocrm_mcp/config.py`. `AMO_SUBDOMAIN` and `AMO_ACCESS_TOKEN` are required; `.env.example` lists the rest. `AMO_TOKEN_FILE` (default `.amo_tokens.json`) is where tokens are persisted; it overrides env tokens, so use a separate file per account/environment (e.g. `.amo_tokens.dev.json` for `dev.env`). First tokens come from `amocrm-mcp-auth`; refresh tokens are single-use and rotated on every refresh.
+Config is read from env vars prefixed `AMO_` (and a `.env` in the CWD) via `amocrm_mcp/config.py`. `AMO_SUBDOMAIN` and `AMO_ACCESS_TOKEN` are required; `.env.example` lists the rest. `AMO_TOKEN_FILE` (default `.amo_tokens.json`) is where tokens are persisted; it overrides env tokens, so use a separate file per account/environment (e.g. `.amo_tokens.dev.json` for `dev.env`). First tokens come from `amocrm-mcp-auth`; refresh tokens are single-use and rotated on every refresh. Without a refresh token (long-lived mode) `AuthManager.can_refresh` is false and a 401 raises a clear `AuthError` instead of attempting a refresh.
 
 ## Architecture
 

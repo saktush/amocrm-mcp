@@ -305,3 +305,56 @@ async def test_get_by_id_204_is_not_found(tool, args, call_tool, recorder):
     recorder.responses.append(httpx.Response(204))
     r = await call_tool(tool, **args)
     assert r["status_code"] == 404 and r["error"] == "Resource not found"
+
+
+# ---- long-lived (no refresh) mode --------------------------------------------
+
+
+async def test_401_without_refresh_token_does_not_refresh(make_config, respx_mock):
+    from amocrm_mcp.auth import AuthError, AuthManager
+
+    auth = AuthManager(make_config(refresh_token="", access_token="long-lived"))
+    assert not auth.can_refresh
+    route = respx_mock.post("https://acme.amocrm.ru/oauth2/access_token")
+    with pytest.raises(AuthError, match="long-lived"):
+        await auth.refresh_token(stale_token="long-lived")
+    assert not route.called
+
+
+async def test_401_without_client_credentials_does_not_refresh(make_config):
+    from amocrm_mcp.auth import AuthManager
+
+    assert not AuthManager(make_config(client_id="", client_secret="")).can_refresh
+
+
+async def test_tool_reports_clear_error_for_rejected_long_lived_token(make_config, monkeypatch, recorder):
+    import httpx
+    from amocrm_mcp import server
+    from amocrm_mcp.auth import AuthManager
+    from amocrm_mcp.client import AmoClient
+
+    import amocrm_mcp.tools  # noqa: F401
+
+    cfg = make_config(refresh_token="")
+    client = AmoClient(auth=AuthManager(cfg), base_url=cfg.base_url)
+    client._transport._inner = httpx.MockTransport(recorder)
+    monkeypatch.setattr(server, "_client", client)
+    recorder.responses.append(httpx.Response(401, json={"title": "Unauthorized"}))
+    r = (await server.mcp.call_tool("account_get", {"input": {}})).structured_content
+    assert r["status_code"] == 401 and "long-lived" in r["detail"]
+    assert len(recorder.requests) == 1  # no retry, no refresh call
+    await client._client.aclose()
+
+
+def test_token_file_wins_and_warns_when_env_token_also_set(make_config, tmp_path, caplog):
+    import json
+    import logging
+
+    from amocrm_mcp.auth import AuthManager
+
+    (tmp_path / "tokens.json").write_text(json.dumps({"access_token": "file-a", "refresh_token": "file-r"}))
+    with caplog.at_level(logging.INFO, logger="amocrm_mcp.auth"):
+        auth = AuthManager(make_config(access_token="env-a"))
+    assert auth.get_access_token() == "file-a" and auth.token_source == "token file"
+    assert any("takes precedence" in r.message for r in caplog.records)
+    assert any("OAuth (auto-refresh)" in r.message for r in caplog.records)

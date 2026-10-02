@@ -31,7 +31,9 @@ cp .env.example .env
 
 You need at minimum `AMO_SUBDOMAIN` plus one way to authenticate:
 - **OAuth (recommended, auto-refresh):** `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REDIRECT_URI`, then run `amocrm-mcp-auth` once to obtain the tokens (see [Getting the first token pair](#getting-the-first-token-pair-oauth-bootstrap)).
-- **Long-lived token (no refresh):** `AMO_ACCESS_TOKEN`.
+- **Long-lived token (no refresh):** `AMO_ACCESS_TOKEN` only. With no refresh token the server never tries to refresh; a rejected token returns a clear 401 error.
+
+The two modes are alternatives. If a token file (`AMO_TOKEN_FILE`) exists, it takes precedence over `AMO_ACCESS_TOKEN`, and a startup warning says so; the startup log also states which source and mode is in use.
 
 Optional platform settings (used for API calls and token refresh):
 - `AMO_BASE_DOMAIN` — `amocrm.ru` (default), `amocrm.com` or `kommo.com`

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ class AuthManager:
         self._access_token: str = config.access_token
         self._refresh_token_value: str = config.refresh_token
         self._token_file = Path(config.token_file)
+        self._refresh_lock = asyncio.Lock()
         self._load_persisted_tokens()
 
     def _load_persisted_tokens(self) -> None:
@@ -90,19 +92,30 @@ class AuthManager:
         """Return the current access token."""
         return self._access_token
 
-    async def refresh_token(self) -> None:
+    async def refresh_token(self, stale_token: str | None = None) -> None:
         """Refresh the access token via POST /oauth2/access_token (FR-2, FR-4).
+
+        Serialized by a lock: the refresh token is single-use, so concurrent 401s
+        must refresh exactly once. If stale_token (the token that got the 401) no
+        longer matches the current one, another caller already refreshed; skip.
 
         On success, persists new tokens to disk.
         On invalid_grant (expired refresh token), raises RefreshTokenExpiredError.
         """
-        url = f"https://{self._config.subdomain}.kommo.com/oauth2/access_token"
+        async with self._refresh_lock:
+            if stale_token is not None and stale_token != self._access_token:
+                logger.info("Token already refreshed by a concurrent request, skipping")
+                return
+            await self._do_refresh()
+
+    async def _do_refresh(self) -> None:
+        url = self._config.token_url
         body = {
             "client_id": self._config.client_id,
             "client_secret": self._config.client_secret,
             "grant_type": "refresh_token",
             "refresh_token": self._refresh_token_value,
-            "redirect_uri": "https://localhost",
+            "redirect_uri": self._config.redirect_uri,
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:

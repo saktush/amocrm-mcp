@@ -20,15 +20,14 @@ async def unsorted_list(input: UnsortedListInput) -> dict:
     """List unsorted (incoming) leads with pagination.
 
     Returns leads from the unsorted inbox that have not yet been
-    accepted into a pipeline or rejected.
+    accepted into a pipeline or rejected. Sorting: order_by (created_at,
+    updated_at) with order_direction, sent as order[<field>]=<direction>.
     """
 
     async def _execute(client):
         params: dict = {"page": input.page, "limit": input.limit}
         if input.order_by:
-            params["order[by]"] = input.order_by
-        if input.order_direction:
-            params["order[direction]"] = input.order_direction
+            params[f"order[{input.order_by}]"] = input.order_direction or "asc"
         data = await client.request(
             "GET", "/api/v4/leads/unsorted", params=params,
         )

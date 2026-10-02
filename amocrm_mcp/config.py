@@ -27,7 +27,19 @@ class Config(BaseSettings):
         description="Transport protocol: stdio, http (Streamable HTTP), or sse (legacy)",
     )
     port: int = Field(default=8000, description="Port for SSE transport")
+    base_domain: str = Field(
+        default="amocrm.ru",
+        description="Platform domain: amocrm.ru, amocrm.com or kommo.com (used for API and OAuth refresh)",
+    )
+    redirect_uri: str = Field(
+        default="https://localhost",
+        description="OAuth redirect URI; must match the integration settings exactly",
+    )
+
+    @property
+    def token_url(self) -> str:
+        return f"{self.base_url}/oauth2/access_token"
 
     @property
     def base_url(self) -> str:
-        return f"https://{self.subdomain}.amocrm.ru"
+        return f"https://{self.subdomain}.{self.base_domain}"

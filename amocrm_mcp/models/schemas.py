@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 MAX_BATCH_SIZE = 50
 MAX_PAGE_LIMIT = 250
 MAX_CUSTOM_FIELDS_PER_ENTITY = 40
+MAX_EVENTS_PAGE_LIMIT = 100
 
 ENTITY_TYPES_FOR_NOTES = ("leads", "contacts", "companies", "customers")
 ENTITY_TYPES_FOR_EVENTS = ("lead", "contact", "company", "customer", "task")
@@ -40,10 +41,37 @@ class PaginationMixin(BaseModel):
 
 
 class CustomFieldInput(BaseModel):
-    """Custom field value for create/update payloads."""
+    """Custom field value for create/update payloads.
 
-    field_id: int
+    Identify the field by exactly one of field_id or field_code (system fields
+    such as PHONE and EMAIL are normally addressed by field_code).
+    values is a list of value objects whose shape depends on the field type:
+    - text/numeric/url/date etc.: [{"value": "..."}]
+    - multitext (PHONE, EMAIL): [{"value": "+123", "enum_code": "WORK"}] (or "enum_id")
+    - select/radiobutton: [{"enum_id": 123}] (or {"value": "..."})
+    - multiselect: [{"enum_id": 1}, {"enum_id": 2}]
+    - checkbox: [{"value": true}]
+    """
+
+    field_id: int | None = Field(default=None, description="Custom field ID")
+    field_code: str | None = Field(
+        default=None, description="Custom field code (e.g. PHONE, EMAIL)"
+    )
     values: list[dict[str, Any]]
+
+    @model_validator(mode="after")
+    def validate_field_identifier(self) -> CustomFieldInput:
+        if (self.field_id is None) == (self.field_code is None):
+            msg = "Exactly one of field_id or field_code is required"
+            raise ValueError(msg)
+        return self
+
+
+class LeadStatusFilter(BaseModel):
+    """One (pipeline_id, status_id) pair for the leads status filter."""
+
+    pipeline_id: int = Field(description="Pipeline ID the status belongs to")
+    status_id: int = Field(description="Status ID")
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +89,16 @@ class LeadsListInput(PaginationMixin):
     responsible_user_id: list[int] | None = Field(
         default=None, description="Filter by responsible user IDs"
     )
+    statuses: list[LeadStatusFilter] | None = Field(
+        default=None,
+        description="Filter by (pipeline_id, status_id) pairs; amoCRM requires both IDs",
+    )
     status_id: list[int] | None = Field(
-        default=None, description="Filter by status IDs"
+        default=None,
+        description=(
+            "DEPRECATED, use statuses. Filter by status IDs; requires exactly one "
+            "pipeline_id, and is translated into statuses pairs"
+        ),
     )
     pipeline_id: list[int] | None = Field(
         default=None, description="Filter by pipeline IDs"
@@ -88,12 +124,33 @@ class LeadsListInput(PaginationMixin):
     query: str | None = Field(
         default=None, description="Search query string"
     )
-    order_field: str | None = Field(
-        default=None, description="Order by field (created_at, updated_at, id)"
+    order_field: Literal["created_at", "updated_at", "id"] | None = Field(
+        default=None, description="Order by field (sent as order[<field>]=<direction>)"
     )
     order_direction: Literal["asc", "desc"] | None = Field(
-        default=None, description="Order direction"
+        default=None, description="Order direction (default asc when order_field is set)"
     )
+
+    @model_validator(mode="after")
+    def validate_status_id_needs_pipeline(self) -> LeadsListInput:
+        self.effective_statuses()
+        return self
+
+    def effective_statuses(self) -> list[LeadStatusFilter]:
+        """Return statuses pairs, translating the deprecated bare status_id."""
+        result = list(self.statuses or [])
+        if self.status_id:
+            if not self.pipeline_id or len(self.pipeline_id) != 1:
+                msg = (
+                    "status_id requires exactly one pipeline_id because amoCRM filters "
+                    "statuses by (pipeline_id, status_id) pairs; use 'statuses' instead"
+                )
+                raise ValueError(msg)
+            result.extend(
+                LeadStatusFilter(pipeline_id=self.pipeline_id[0], status_id=sid)
+                for sid in self.status_id
+            )
+        return result
 
 
 class LeadsGetInput(BaseModel):
@@ -581,11 +638,12 @@ class BatchCreateContactsInput(BaseModel):
 class UnsortedListInput(PaginationMixin):
     """Input for unsorted_list tool."""
 
-    order_by: str | None = Field(
-        default=None, description="Order by field"
+    order_by: Literal["created_at", "updated_at"] | None = Field(
+        default=None,
+        description="Order by field (sent as order[<field>]=<direction>)",
     )
     order_direction: Literal["asc", "desc"] | None = Field(
-        default=None, description="Order direction"
+        default=None, description="Order direction (default asc when order_by is set)"
     )
 
 
@@ -618,6 +676,12 @@ class UnsortedRejectInput(BaseModel):
 class AnalyticsGetEventsInput(PaginationMixin):
     """Input for analytics_get_events tool."""
 
+    limit: int = Field(
+        default=100,
+        ge=1,
+        le=MAX_EVENTS_PAGE_LIMIT,
+        description="Items per page (max 100 for events)",
+    )
     entity_type: str | None = Field(
         default=None,
         description="Filter by entity type (lead, contact, company, customer, task)",

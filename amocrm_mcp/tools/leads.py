@@ -17,8 +17,12 @@ from amocrm_mcp.server import execute_tool, mcp
 async def leads_list(input: LeadsListInput) -> dict:
     """List leads with optional filters and pagination.
 
-    Supports filtering by responsible_user_id, status_id, pipeline_id,
-    created_at/updated_at/closed_at date ranges, and search query.
+    Supports filtering by responsible_user_id, statuses (list of
+    {pipeline_id, status_id} pairs), pipeline_id, created_at/updated_at/closed_at
+    date ranges, and search query. The bare status_id filter is deprecated: it is
+    only accepted together with exactly one pipeline_id and is translated into
+    statuses pairs. Sorting: order_field (created_at, updated_at, id) with
+    order_direction (asc, desc), sent as order[<field>]=<direction>.
     Use with_related to embed contacts, companies, or catalog_elements.
     """
 
@@ -29,15 +33,16 @@ async def leads_list(input: LeadsListInput) -> dict:
         if input.query:
             params["query"] = input.query
         if input.order_field:
-            params["order[field]"] = input.order_field
-        if input.order_direction:
-            params["order[direction]"] = input.order_direction
+            params[f"order[{input.order_field}]"] = input.order_direction or "asc"
         filters = {}
         if input.responsible_user_id:
             filters["responsible_user_id"] = input.responsible_user_id
-        if input.status_id:
-            filters["status_id"] = input.status_id
-        if input.pipeline_id:
+        statuses = input.effective_statuses()
+        for i, st in enumerate(statuses):
+            params[f"filter[statuses][{i}][pipeline_id]"] = st.pipeline_id
+            params[f"filter[statuses][{i}][status_id]"] = st.status_id
+        # Pipeline is already encoded in the statuses pairs when status_id was translated
+        if input.pipeline_id and not input.status_id:
             filters["pipeline_id"] = input.pipeline_id
         if input.created_at_from is not None:
             filters["created_at_from"] = input.created_at_from
@@ -101,7 +106,7 @@ async def leads_create(input: LeadsCreateInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         data = await client.request(
             "POST", "/api/v4/leads", json_data=[payload],
@@ -130,7 +135,7 @@ async def leads_update(input: LeadsUpdateInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         data = await client.request(
             "PATCH", "/api/v4/leads", json_data=[payload],

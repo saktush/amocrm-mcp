@@ -24,7 +24,7 @@ async def companies_create(input: CompaniesCreateInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         data = await client.request(
             "POST", "/api/v4/companies", json_data=[payload],
@@ -87,7 +87,7 @@ async def companies_update(input: CompaniesUpdateInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         data = await client.request(
             "PATCH", "/api/v4/companies", json_data=[payload],

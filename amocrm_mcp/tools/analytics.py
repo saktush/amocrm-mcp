@@ -25,7 +25,8 @@ async def analytics_get_events(input: AnalyticsGetEventsInput) -> dict:
     Supports filtering by entity type (lead, contact, company, customer, task),
     entity ID, date range (unix timestamps), and event types.
     Event entity_type uses singular form (lead, not leads).
-    entity_id requires entity_type to be set.
+    entity_id requires entity_type to be set. limit is capped at 100
+    (default 100), the maximum amoCRM allows for events.
 
     Filter encoding verified against live amoCRM API:
     - filter[entity][] for entity type
@@ -83,7 +84,7 @@ async def leads_create_complex(input: ComplexLeadInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         if input.contacts is not None:
             payload["_embedded"] = payload.get("_embedded", {})

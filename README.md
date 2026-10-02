@@ -36,6 +36,10 @@ You need at minimum:
 For automatic token refresh, also set:
 - `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REFRESH_TOKEN`
 
+Optional platform settings (used for API calls and token refresh):
+- `AMO_BASE_DOMAIN` — `amocrm.ru` (default), `amocrm.com` or `kommo.com`
+- `AMO_REDIRECT_URI` — OAuth redirect URI, default `https://localhost`; must match your integration settings exactly
+
 ### 3. Run
 
 **On your local machine**, from the repo root with the venv active:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 from typing import Any
@@ -53,7 +54,8 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         # Inject current access token
-        request.headers["Authorization"] = f"Bearer {self._auth.get_access_token()}"
+        used_token = self._auth.get_access_token()
+        request.headers["Authorization"] = f"Bearer {used_token}"
 
         # Rate-limit: await slot before sending
         await self._limiter.acquire()
@@ -64,7 +66,7 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
             logger.info("Received 401, attempting token refresh")
             await response.aread()
             await response.aclose()
-            await self._auth.refresh_token()
+            await self._auth.refresh_token(stale_token=used_token)
             request.headers["Authorization"] = f"Bearer {self._auth.get_access_token()}"
             await self._limiter.acquire()
             response = await self._inner.handle_async_request(request)
@@ -76,8 +78,6 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
         return response
 
     async def _handle_429(self, request: httpx.Request, response: httpx.Response) -> httpx.Response:
-        import asyncio
-
         for attempt in range(1, MAX_429_RETRIES + 1):
             await response.aread()
             retry_after = response.headers.get("Retry-After")
@@ -128,7 +128,7 @@ class AmoClient:
         method: str,
         path: str,
         params: dict | None = None,
-        json_data: dict | None = None,
+        json_data: dict | list | None = None,
     ) -> dict:
         """Execute an API request, returning normalized response data.
 

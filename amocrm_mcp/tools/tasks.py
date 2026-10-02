@@ -57,7 +57,7 @@ async def tasks_list(input: TasksListInput) -> dict:
     """List tasks with optional filters and pagination.
 
     Supports filtering by entity_type, entity_id, responsible_user_id,
-    and completion status.
+    and completion status (sent as 1/0).
     """
 
     async def _execute(client):
@@ -70,7 +70,7 @@ async def tasks_list(input: TasksListInput) -> dict:
         if input.responsible_user_id:
             filters["responsible_user_id"] = input.responsible_user_id
         if input.is_completed is not None:
-            filters["is_completed"] = input.is_completed
+            filters["is_completed"] = 1 if input.is_completed else 0
         if filters:
             params.update(build_filters(filters))
         data = await client.request("GET", "/api/v4/tasks", params=params)

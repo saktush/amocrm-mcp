@@ -13,18 +13,25 @@ from amocrm_mcp.auth import AuthManager, RefreshTokenExpiredError
 logger = logging.getLogger("amocrm_mcp.client")
 
 MAX_429_RETRIES = 5
+GATEWAY_RETRY_STATUSES = (502, 503, 504)
+GATEWAY_RETRY_DELAYS = (0.5, 1.0, 2.0)  # bounded backoff; idempotent GET requests only
 RATE_LIMIT_MAX_RATE = 7
 RATE_LIMIT_TIME_PERIOD = 1
 
 HTTP_STATUS_MESSAGES: dict[int, str] = {
     400: "Bad request. Check the request parameters and payload format.",
     401: "Authentication failed. Token may be invalid or expired.",
-    403: "Access forbidden. The integration lacks required permissions for this operation.",
+    402: "Payment required. The amoCRM subscription has expired; write requests are blocked.",
+    403: (
+        "Access forbidden. The integration lacks required permissions, the account is "
+        "blocked, or repeated rate-limit (429) violations triggered a temporary block."
+    ),
     404: "Resource not found. Verify the entity ID or endpoint path.",
     422: "Unprocessable entity. The request payload contains invalid field values.",
     429: "Rate limit exceeded. Too many requests to the amoCRM API.",
     500: "amoCRM internal server error. Retry the request later.",
     502: "Bad gateway. amoCRM upstream is temporarily unavailable.",
+    503: "Service unavailable. amoCRM is temporarily unavailable.",
     504: "Gateway timeout. amoCRM did not respond in time.",
 }
 
@@ -45,6 +52,7 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
     Also handles:
     - 401 -> transparent token refresh + retry (FR-2)
     - 429 -> exponential backoff with jitter (FR-6)
+    - 502/503/504 on GET -> up to 3 retries with short backoff
     """
 
     def __init__(self, auth: AuthManager) -> None:
@@ -75,6 +83,27 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
         if response.status_code == 429:
             response = await self._handle_429(request, response)
 
+        # 502/503/504 -> small bounded retry, idempotent GET only
+        if request.method == "GET" and response.status_code in GATEWAY_RETRY_STATUSES:
+            response = await self._handle_gateway_errors(request, response)
+
+        return response
+
+    async def _handle_gateway_errors(
+        self, request: httpx.Request, response: httpx.Response,
+    ) -> httpx.Response:
+        for attempt, delay in enumerate(GATEWAY_RETRY_DELAYS, start=1):
+            logger.warning(
+                "HTTP %d on GET, retry %d/%d in %.1fs",
+                response.status_code, attempt, len(GATEWAY_RETRY_DELAYS), delay,
+            )
+            await response.aread()
+            await response.aclose()
+            await asyncio.sleep(delay)
+            await self._limiter.acquire()
+            response = await self._inner.handle_async_request(request)
+            if response.status_code not in GATEWAY_RETRY_STATUSES:
+                break
         return response
 
     async def _handle_429(self, request: httpx.Request, response: httpx.Response) -> httpx.Response:

@@ -46,7 +46,9 @@ async def unsorted_accept(input: UnsortedAcceptInput) -> dict:
     """Accept an unsorted lead into a pipeline.
 
     Moves the unsorted lead identified by uid into the specified pipeline
-    and status. Optionally assigns to a specific user.
+    and status. Optionally assigns to a specific user. The API takes only
+    user_id and status_id (the status determines the pipeline); pipeline_id
+    is no longer sent.
     """
 
     async def _execute(client):
@@ -55,8 +57,6 @@ async def unsorted_accept(input: UnsortedAcceptInput) -> dict:
             payload["user_id"] = input.user_id
         if input.status_id is not None:
             payload["status_id"] = input.status_id
-        if input.pipeline_id is not None:
-            payload["pipeline_id"] = input.pipeline_id
         data = await client.request(
             "POST",
             f"/api/v4/leads/unsorted/{input.uid}/accept",
@@ -72,12 +72,16 @@ async def unsorted_reject(input: UnsortedRejectInput) -> dict:
     """Reject (decline) an unsorted lead.
 
     Removes the unsorted lead identified by uid from the inbox.
-    Uses DELETE method on the decline endpoint.
+    Uses DELETE method on the decline endpoint. Optional user_id is sent as a
+    JSON body and identifies the user declining the lead.
     """
 
     async def _execute(client):
+        payload = {"user_id": input.user_id} if input.user_id is not None else None
         data = await client.request(
-            "DELETE", f"/api/v4/leads/unsorted/{input.uid}/decline",
+            "DELETE",
+            f"/api/v4/leads/unsorted/{input.uid}/decline",
+            json_data=payload,
         )
         return success_response(data)
 

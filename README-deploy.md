@@ -53,6 +53,7 @@ amoCRM MCP server started with 36 tools on http transport
 | `AMO_REFRESH_TOKEN` | For auto-refresh | `""` | OAuth refresh token (seed) |
 | `AMO_BASE_DOMAIN` | No | `amocrm.ru` | Platform domain (`amocrm.ru`, `amocrm.com` or `kommo.com`). Used for both API calls (`https://<subdomain>.<domain>`) and OAuth token refresh. |
 | `AMO_REDIRECT_URI` | No | `https://localhost` | OAuth redirect URI used on token refresh; must match the integration settings exactly. |
+| `AMO_MAX_BATCH_SIZE` | No | `50` | Max items per `batch_*` call; values above the amoCRM limit of `250` are clamped to `250`. |
 | `AMO_TOKEN_FILE` | No | Fixed to `/data/.amo_tokens.json` by Docker setup | Where refreshed tokens are persisted. Overridable, but must point inside `/data` to survive container recreation. |
 | `AMO_TRANSPORT` | No | Fixed to `http` by Docker setup | Streamable HTTP (modern standard, required by Codex). `sse` (legacy) is also available — see [Advanced: stdio](#advanced-stdio-inside-a-container-discouraged) for how to override. |
 | `AMO_PORT` | No | `8000` | Also controls the published host port (`docker-compose.yml` maps `${AMO_PORT}:${AMO_PORT}`). |

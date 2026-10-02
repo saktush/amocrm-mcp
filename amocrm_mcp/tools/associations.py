@@ -15,6 +15,8 @@ async def associations_link_entities(input: AssociationsLinkEntitiesInput) -> di
     """Link two entities together (e.g., lead to contact, contact to company).
 
     Validates that both entity types are linkable before making the API call.
+    to_entity_type may also be catalog_elements; pass metadata such as
+    {"catalog_id": ..., "quantity": ...} for those links.
     """
 
     async def _execute(client):

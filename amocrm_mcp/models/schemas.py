@@ -9,11 +9,27 @@ Constraints enforced:
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-MAX_BATCH_SIZE = 50
+BATCH_SIZE_HARD_CAP = 250
+
+
+def resolve_max_batch_size(env: dict[str, str] | None = None) -> int:
+    """Batch size cap: AMO_MAX_BATCH_SIZE (default 50, clamped to 1..250)."""
+    raw = (env if env is not None else os.environ).get("AMO_MAX_BATCH_SIZE")
+    if not raw:
+        return 50
+    try:
+        value = int(raw)
+    except ValueError:
+        return 50
+    return max(1, min(value, BATCH_SIZE_HARD_CAP))
+
+
+MAX_BATCH_SIZE = resolve_max_batch_size()
 MAX_PAGE_LIMIT = 250
 MAX_CUSTOM_FIELDS_PER_ENTITY = 40
 MAX_EVENTS_PAGE_LIMIT = 100
@@ -21,6 +37,7 @@ MAX_EVENTS_PAGE_LIMIT = 100
 ENTITY_TYPES_FOR_NOTES = ("leads", "contacts", "companies", "customers")
 ENTITY_TYPES_FOR_EVENTS = ("lead", "contact", "company", "customer", "task")
 LINKABLE_ENTITY_TYPES = ("leads", "contacts", "companies", "customers")
+LINK_TARGET_ENTITY_TYPES = (*LINKABLE_ENTITY_TYPES, "catalog_elements")
 
 
 # ---------------------------------------------------------------------------
@@ -509,18 +526,30 @@ class AssociationsLinkEntitiesInput(BaseModel):
     )
     entity_id: int = Field(description="Source entity ID")
     to_entity_type: str = Field(
-        description="Target entity type (leads, contacts, companies, customers)"
+        description="Target entity type (leads, contacts, companies, customers, catalog_elements)"
     )
     to_entity_id: int = Field(description="Target entity ID")
     metadata: dict[str, Any] | None = Field(
-        default=None, description="Link metadata (e.g., is_main for contacts)"
+        default=None,
+        description=(
+            "Link metadata (e.g., is_main for contacts; catalog_id and quantity "
+            "for catalog_elements)"
+        ),
     )
 
-    @field_validator("entity_type", "to_entity_type")
+    @field_validator("entity_type")
     @classmethod
     def validate_entity_type(cls, v: str) -> str:
         if v not in LINKABLE_ENTITY_TYPES:
             msg = f"entity_type must be one of {LINKABLE_ENTITY_TYPES}, got '{v}'"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("to_entity_type")
+    @classmethod
+    def validate_to_entity_type(cls, v: str) -> str:
+        if v not in LINK_TARGET_ENTITY_TYPES:
+            msg = f"to_entity_type must be one of {LINK_TARGET_ENTITY_TYPES}, got '{v}'"
             raise ValueError(msg)
         return v
 
@@ -574,10 +603,10 @@ class AccountListCustomFieldsInput(PaginationMixin):
 
 
 class BatchCreateLeadsInput(BaseModel):
-    """Input for batch_create_leads tool. Max 50 items per call (C-3)."""
+    """Input for batch_create_leads tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
-        description="Array of lead objects to create (max 50)",
+        description="Array of lead objects to create (max AMO_MAX_BATCH_SIZE, default 50)",
     )
 
     @field_validator("items")
@@ -593,7 +622,7 @@ class BatchCreateLeadsInput(BaseModel):
 
 
 class BatchUpdateLeadsInput(BaseModel):
-    """Input for batch_update_leads tool. Max 50 items per call (C-3)."""
+    """Input for batch_update_leads tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
         description="Array of lead objects to update (max 50), each must include 'id'",
@@ -612,10 +641,10 @@ class BatchUpdateLeadsInput(BaseModel):
 
 
 class BatchCreateContactsInput(BaseModel):
-    """Input for batch_create_contacts tool. Max 50 items per call (C-3)."""
+    """Input for batch_create_contacts tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
-        description="Array of contact objects to create (max 50)",
+        description="Array of contact objects to create (max AMO_MAX_BATCH_SIZE, default 50)",
     )
 
     @field_validator("items")
@@ -657,15 +686,17 @@ class UnsortedAcceptInput(BaseModel):
     status_id: int | None = Field(
         default=None, description="Pipeline status ID to place the lead in"
     )
-    pipeline_id: int | None = Field(
-        default=None, description="Pipeline ID to place the lead in"
-    )
+    # pipeline_id was removed: the accept endpoint only takes user_id and status_id
+    # (the status already determines the pipeline). Extra input keys are ignored.
 
 
 class UnsortedRejectInput(BaseModel):
     """Input for unsorted_reject tool."""
 
     uid: str = Field(description="Unsorted lead UID")
+    user_id: int | None = Field(
+        default=None, description="User ID on whose behalf the lead is declined"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -820,4 +851,9 @@ class AnalyticsGetPipelineAnalyticsInput(BaseModel):
     )
     created_at_to: int | None = Field(
         default=None, description="Filter leads created to (unix timestamp)"
+    )
+    max_leads: int = Field(
+        default=10000,
+        ge=1,
+        description="Stop fetching after this many leads (result is flagged truncated)",
     )

@@ -53,6 +53,13 @@ async def test_unsorted_list_order(call_tool, recorder):
     assert recorder.last.url.path == "/api/v4/leads/unsorted"
 
 
+def test_order_direction_requires_field():
+    with pytest.raises(ValidationError, match="order_field"):
+        LeadsListInput(order_direction="desc")
+    with pytest.raises(ValidationError, match="order_by"):
+        UnsortedListInput(order_direction="desc")
+
+
 def test_unsorted_order_field_restricted():
     with pytest.raises(ValidationError):
         UnsortedListInput(order_by="id")

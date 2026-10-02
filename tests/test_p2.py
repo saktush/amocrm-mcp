@@ -19,11 +19,15 @@ from tests.test_p1 import query
 
 
 @pytest.fixture(autouse=True)
-def no_sleep(monkeypatch):
-    async def _sleep(_):
-        return None
+def sleeps(monkeypatch):
+    """Record backoff delays instead of sleeping."""
+    delays: list[float] = []
 
-    monkeypatch.setattr(client_module.asyncio, "sleep", _sleep)
+    async def _fake_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(client_module, "_sleep", _fake_sleep)
+    return delays
 
 
 # ---- unsorted accept / reject ------------------------------------------------
@@ -86,21 +90,48 @@ def test_catalog_elements_not_allowed_as_source():
 
 
 @pytest.mark.parametrize("status", [502, 503, 504])
-async def test_get_retried_on_gateway_errors(amo_client, recorder, status):
+async def test_get_retried_on_gateway_errors(amo_client, recorder, sleeps, status):
     recorder.responses.extend(
         [httpx.Response(status), httpx.Response(status), httpx.Response(200, json={"ok": True})]
     )
     data = await amo_client.request("GET", "/api/v4/leads")
     assert data["ok"] is True
     assert len(recorder.requests) == 3
+    assert sleeps == [0.5, 1.0]
 
 
-async def test_get_retry_is_bounded(amo_client, recorder):
+async def test_get_retry_is_bounded(amo_client, recorder, sleeps):
     recorder.handler = lambda r: httpx.Response(504, json={"detail": "timeout"})
     with pytest.raises(client_module.AmoAPIError) as exc:
         await amo_client.request("GET", "/api/v4/leads")
     assert exc.value.status_code == 504
-    assert len(recorder.requests) == 1 + len(client_module.GATEWAY_RETRY_DELAYS)
+    assert len(recorder.requests) == 4
+    assert sleeps == [0.5, 1.0, 2.0]
+
+
+async def test_gateway_retry_then_401_refreshes_once(amo_client, recorder, respx_mock):
+    refresh = respx_mock.post("https://acme.amocrm.ru/oauth2/access_token").mock(
+        return_value=httpx.Response(200, json={"access_token": "new-a", "refresh_token": "new-r"})
+    )
+
+    def handler(request):
+        if request.headers["Authorization"] == "Bearer new-a":
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(502) if len(recorder.requests) == 1 else httpx.Response(401)
+
+    recorder.handler = handler
+    data = await amo_client.request("GET", "/api/v4/leads")
+    assert data["ok"] is True
+    assert refresh.call_count == 1
+
+
+async def test_gateway_retry_then_429_backs_off(amo_client, recorder, sleeps):
+    recorder.responses.extend(
+        [httpx.Response(504), httpx.Response(429, headers={"Retry-After": "3"}), httpx.Response(200, json={"ok": True})]
+    )
+    data = await amo_client.request("GET", "/api/v4/leads")
+    assert data["ok"] is True
+    assert sleeps == [0.5, 3.0]
 
 
 async def test_post_not_retried_on_gateway_error(amo_client, recorder):
@@ -127,9 +158,12 @@ def test_max_batch_size_env():
     assert resolve_max_batch_size({"AMO_MAX_BATCH_SIZE": "abc"}) == 50
 
 
-async def test_batch_default_cap_enforced():
+async def test_batch_default_cap_enforced(monkeypatch):
+    from amocrm_mcp.models import schemas
     from amocrm_mcp.models.schemas import BatchCreateLeadsInput
 
+    monkeypatch.delenv("AMO_MAX_BATCH_SIZE", raising=False)
+    monkeypatch.setattr(schemas, "MAX_BATCH_SIZE", schemas.resolve_max_batch_size())
     BatchCreateLeadsInput(items=[{"name": "x"}] * 50)
     with pytest.raises(ValidationError):
         BatchCreateLeadsInput(items=[{"name": "x"}] * 51)
@@ -230,3 +264,34 @@ def test_normalize_embedded_key_overwrites_top_level_key():
         "tags": [{"id": 5}],
         "contacts": [{"id": 9}],
     }
+
+
+def test_batch_cap_configurable_at_runtime(monkeypatch):
+    from amocrm_mcp.models import schemas
+
+    monkeypatch.setattr(schemas, "MAX_BATCH_SIZE", 50)
+    schemas.configure_max_batch_size(10)
+    with pytest.raises(ValidationError):
+        schemas.BatchCreateLeadsInput(items=[{}] * 11)
+    schemas.configure_max_batch_size(9999)
+    assert schemas.MAX_BATCH_SIZE == 250
+
+
+def test_env_example_loads_via_config(tmp_path, monkeypatch):
+    """Every key in .env.example must be accepted by Config (extras are forbidden)."""
+    from pathlib import Path
+
+    from amocrm_mcp.config import Config
+
+    example = Path(__file__).resolve().parent.parent / ".env.example"
+    env_file = tmp_path / ".env"
+    env_file.write_text(example.read_text())
+    monkeypatch.chdir(tmp_path)
+    for key in list(__import__("os").environ):
+        if key.startswith("AMO_"):
+            monkeypatch.delenv(key)
+    cfg = Config(_env_file=str(env_file))
+    assert cfg.max_batch_size == 50
+    assert cfg.base_domain == "amocrm.ru"
+    env_file.write_text(example.read_text().replace("AMO_MAX_BATCH_SIZE=50", "AMO_MAX_BATCH_SIZE=999"))
+    assert Config(_env_file=str(env_file)).max_batch_size == 250

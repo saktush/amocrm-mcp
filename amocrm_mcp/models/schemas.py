@@ -2,7 +2,7 @@
 
 Validation-first: malformed input fails before any network call to amoCRM.
 Constraints enforced:
-- Batch operations: max 50 items per call (C-3)
+- Batch operations: max AMO_MAX_BATCH_SIZE items per call, default 50 (C-3)
 - Pagination: limit max 250 (C-2)
 - Complex lead: max 1 contact, max 1 company, max 40 custom fields per entity (C-4)
 """
@@ -30,6 +30,15 @@ def resolve_max_batch_size(env: dict[str, str] | None = None) -> int:
 
 
 MAX_BATCH_SIZE = resolve_max_batch_size()
+
+
+def configure_max_batch_size(value: int) -> None:
+    """Set the batch cap at runtime (server startup passes Config.max_batch_size).
+
+    Batch validators read the module global at validation time.
+    """
+    global MAX_BATCH_SIZE
+    MAX_BATCH_SIZE = max(1, min(value, BATCH_SIZE_HARD_CAP))
 MAX_PAGE_LIMIT = 250
 MAX_CUSTOM_FIELDS_PER_ENTITY = 40
 MAX_EVENTS_PAGE_LIMIT = 100
@@ -68,6 +77,7 @@ class CustomFieldInput(BaseModel):
     - select/radiobutton: [{"enum_id": 123}] (or {"value": "..."})
     - multiselect: [{"enum_id": 1}, {"enum_id": 2}]
     - checkbox: [{"value": true}]
+    None values inside the values dicts are stripped from the payload (exclude_none).
     """
 
     field_id: int | None = Field(default=None, description="Custom field ID")
@@ -150,6 +160,9 @@ class LeadsListInput(PaginationMixin):
 
     @model_validator(mode="after")
     def validate_status_id_needs_pipeline(self) -> LeadsListInput:
+        if self.order_direction and not self.order_field:
+            msg = "order_direction requires order_field"
+            raise ValueError(msg)
         self.effective_statuses()
         return self
 
@@ -598,7 +611,7 @@ class AccountListCustomFieldsInput(PaginationMixin):
 
 
 # ---------------------------------------------------------------------------
-# Batch (3 tools) - max 50 items per call (C-3)
+# Batch (3 tools) - max AMO_MAX_BATCH_SIZE items per call, default 50 (C-3)
 # ---------------------------------------------------------------------------
 
 
@@ -625,7 +638,7 @@ class BatchUpdateLeadsInput(BaseModel):
     """Input for batch_update_leads tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
-        description="Array of lead objects to update (max 50), each must include 'id'",
+        description="Array of lead objects to update (max AMO_MAX_BATCH_SIZE, default 50), each must include 'id'",
     )
 
     @field_validator("items")
@@ -674,6 +687,13 @@ class UnsortedListInput(PaginationMixin):
     order_direction: Literal["asc", "desc"] | None = Field(
         default=None, description="Order direction (default asc when order_by is set)"
     )
+
+    @model_validator(mode="after")
+    def validate_direction_needs_field(self) -> UnsortedListInput:
+        if self.order_direction and not self.order_by:
+            msg = "order_direction requires order_by"
+            raise ValueError(msg)
+        return self
 
 
 class UnsortedAcceptInput(BaseModel):

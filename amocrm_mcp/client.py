@@ -36,6 +36,11 @@ HTTP_STATUS_MESSAGES: dict[int, str] = {
 }
 
 
+async def _sleep(delay: float) -> None:
+    """Indirection so tests can replace backoff sleeping without patching asyncio."""
+    await asyncio.sleep(delay)
+
+
 class AmoAPIError(Exception):
     """Raised on non-retryable amoCRM API errors."""
 
@@ -71,13 +76,7 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
 
         # 401 -> refresh token and retry once
         if response.status_code == 401:
-            logger.info("Received 401, attempting token refresh")
-            await response.aread()
-            await response.aclose()
-            await self._auth.refresh_token(stale_token=used_token)
-            request.headers["Authorization"] = f"Bearer {self._auth.get_access_token()}"
-            await self._limiter.acquire()
-            response = await self._inner.handle_async_request(request)
+            response = await self._refresh_and_retry(request, response, used_token)
 
         # 429 -> exponential backoff with jitter
         if response.status_code == 429:
@@ -89,6 +88,17 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
 
         return response
 
+    async def _refresh_and_retry(
+        self, request: httpx.Request, response: httpx.Response, used_token: str,
+    ) -> httpx.Response:
+        logger.info("Received 401, attempting token refresh")
+        await response.aread()
+        await response.aclose()
+        await self._auth.refresh_token(stale_token=used_token)
+        request.headers["Authorization"] = f"Bearer {self._auth.get_access_token()}"
+        await self._limiter.acquire()
+        return await self._inner.handle_async_request(request)
+
     async def _handle_gateway_errors(
         self, request: httpx.Request, response: httpx.Response,
     ) -> httpx.Response:
@@ -99,11 +109,17 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
             )
             await response.aread()
             await response.aclose()
-            await asyncio.sleep(delay)
+            await _sleep(delay)
             await self._limiter.acquire()
             response = await self._inner.handle_async_request(request)
             if response.status_code not in GATEWAY_RETRY_STATUSES:
                 break
+        # The retried response may be a 401/429: apply the usual handling once
+        if response.status_code == 401:
+            stale = request.headers.get("Authorization", "").removeprefix("Bearer ")
+            response = await self._refresh_and_retry(request, response, stale)
+        if response.status_code == 429:
+            response = await self._handle_429(request, response)
         return response
 
     async def _handle_429(self, request: httpx.Request, response: httpx.Response) -> httpx.Response:
@@ -117,7 +133,7 @@ class RateLimitedTransport(httpx.AsyncBaseTransport):
 
             logger.warning("429 backoff attempt %d/%d, waiting %.1fs", attempt, MAX_429_RETRIES, delay)
             await response.aclose()
-            await asyncio.sleep(delay)
+            await _sleep(delay)
             await self._limiter.acquire()
             response = await self._inner.handle_async_request(request)
             if response.status_code != 429:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -35,6 +35,16 @@ class Config(BaseSettings):
         default="https://localhost",
         description="OAuth redirect URI; must match the integration settings exactly",
     )
+
+    max_batch_size: int = Field(
+        default=50,
+        description="Max items per batch_* call (clamped to 1..250)",
+    )
+
+    @field_validator("max_batch_size")
+    @classmethod
+    def clamp_max_batch_size(cls, v: int) -> int:
+        return max(1, min(v, 250))
 
     @property
     def token_url(self) -> str:

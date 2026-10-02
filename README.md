@@ -11,7 +11,7 @@ Built with [FastMCP](https://github.com/jlowin/fastmcp). Works with Claude Deskt
 - **Rate limiting** — 7 req/s with automatic 429 backoff and jitter
 - **HAL+JSON normalization** — strips `_links`, flattens `_embedded`
 - **Consistent response envelopes** — `{data, pagination}` or `{error, status_code, detail}`
-- **stdio and SSE** transports
+- **stdio, Streamable HTTP and SSE** transports
 
 ## Quick Start
 
@@ -73,7 +73,7 @@ For a network-reachable deployment via Docker (any Linux server or Docker Deskto
 
 ## Connect to a Client
 
-All snippets assume you've already done steps 1–2 above. Replace `/absolute/path/to/amocrm-mcp` with this repo's actual path, and fill in your real `AMO_SUBDOMAIN`/`AMO_ACCESS_TOKEN` (or rely on the `.env` file the server reads automatically, in which case the `env` blocks below can be omitted for local use).
+All snippets assume you've already done steps 1–2 above. Replace `/absolute/path/to/amocrm-mcp` with this repo's actual path, and fill in your real `AMO_SUBDOMAIN`/`AMO_ACCESS_TOKEN` (or rely on the `.env` file and the token file written by `amocrm-mcp-auth`, which the server reads automatically, in which case the `env` blocks below can be omitted for local use).
 
 ### Claude Desktop
 

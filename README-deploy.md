@@ -133,7 +133,7 @@ Either way, connect the client to `http://<host>:8000/sse` instead of `/mcp`. SS
 
 ## Persistent Token Storage
 
-Refreshed OAuth tokens are written to `/data/.amo_tokens.json` inside the container, which is backed by the `amo_tokens` named Docker volume declared in `docker-compose.yml`. This is what lets refreshed tokens survive container restarts/recreation — without it, the server would fall back to the (possibly stale) env-seeded `AMO_ACCESS_TOKEN` every time the container is recreated.
+Refreshed OAuth tokens are written to `/data/.amo_tokens.json` inside the container, which is backed by the `amo_tokens` named Docker volume declared in `docker-compose.yml`. This is what lets refreshed tokens survive container restarts/recreation — without it, the server would fall back to the (possibly stale) env-seeded tokens every time the container is recreated (and a rotated, single-use refresh token would be lost).
 
 To inspect the persisted token file:
 

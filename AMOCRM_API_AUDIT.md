@@ -1,8 +1,8 @@
 # amoCRM MCP server: API audit against official documentation
 
-Date: 2026-10-02. Sources: pages under https://www.amocrm.ru/developers/content/ (leads-api, filters-api, contacts-api, tasks-api, events-and-notes, entity-links-api, unsorted-api, leads_pipelines, tags-api, webhooks-api, custom-fields, oauth/step-by-step, api/recommendations).
+Date: 2026-10-02. **Status: all P1 and P2 items in section 2 are fixed on branch `fix/api-audit-p1-p2` and verified live (section 7); sections 3 and 4 (gaps and new tools) remain open.** Sections 1 to 6 are kept as the original findings. Sources: pages under https://www.amocrm.ru/developers/content/ (leads-api, filters-api, contacts-api, tasks-api, events-and-notes, entity-links-api, unsorted-api, leads_pipelines, tags-api, webhooks-api, custom-fields, oauth/step-by-step, api/recommendations).
 
-Method: every endpoint, parameter and payload in `amocrm_mcp/` was compared with the docs. The doc pages were read through a summarizer, not the raw HTML, and nothing was tested against a live account. Findings are labelled **Confirmed** (the docs contradict the code), **Likely** (the docs imply a problem, but a live call should confirm it) or **Gap** (a capability that is missing).
+Method: every endpoint, parameter and payload in `amocrm_mcp/` was compared with the docs. The doc pages were read through a summarizer, not the raw HTML, and nothing was tested against a live account at the time of writing (see section 7 for the later live verification). Findings are labelled **Confirmed** (the docs contradict the code), **Likely** (the docs imply a problem, but a live call should confirm it) or **Gap** (a capability that is missing).
 
 ## 1. Summary
 
@@ -31,7 +31,7 @@ The bugs are in query-parameter syntax, token refresh, and what a few tools supp
 | 6 | `auth.py:refresh_token` | `redirect_uri` is hardcoded to `https://localhost`. The docs require it to match the integration settings exactly. **Confirmed.** | oauth/step-by-step. | Add an `AMO_REDIRECT_URI` setting. |
 | 7 | `client.py:RateLimitedTransport` | Several requests can get a 401 at once, and each calls `refresh_token()`. The refresh token can be exchanged only once. The second call fails with `invalid_grant` and is reported as "Refresh token expired". **Confirmed** (single-use) and **Likely** (race). | oauth/step-by-step. | Add an `asyncio.Lock` around refresh. After acquiring it, compare the current access token with the one that failed and skip the refresh if it already changed. |
 | 8 | `models/schemas.py:CustomFieldInput` | It only allows `field_id`. The docs accept `field_id` or `field_code`. System fields like `PHONE` and `EMAIL` are normally addressed by code, and multitext values need `enum_id` or `enum_code`. The input also can't express values like `{"enum_id": …}` safely, because `values` is a free-form dict. **Confirmed** (the model is restrictive). | custom-fields. | Make `field_id` optional and add `field_code`. Require exactly one of them. Document the value shapes per field type in the model description. |
-| 9 | `tools/tasks.py:tasks_list` | `is_completed=True` is sent as `filter[is_completed][]=true`. The docs say `1` or `0`. **Likely.** | tasks-api. | Convert to `1` and `0`. |
+| 9 | `tools/tasks.py:tasks_list` | `is_completed=True` is sent as `filter[is_completed][]=true`. The docs say `1` or `0`. **Likely.** | tasks-api. | Convert to `1` and `0`. **Live correction:** the scalar form `filter[is_completed]=0` is required; the bracket form with 0 returns completed tasks (section 7). |
 
 ### P2: smaller correctness and robustness issues
 
@@ -92,7 +92,7 @@ Ordered by likely usefulness. Every area below appears in the official API index
 
 ## 6. Limits of this audit
 
-- No live API calls. Anything labelled **Likely** needs a quick check against a real account (a test account is fine).
+- This audit itself made no live API calls; the **Likely** items were later checked against a dev account (section 7).
 - The rate-limit page was read in full, but the error-codes page and the individual companies, catalogs, customers and loss-reasons pages were not fetched. Their details above come from the platform index or from general knowledge of the API and should be confirmed before they are built on.
 - The amoCRM docs split into amocrm.ru and amocrm.com/kommo.com variants. This audit used the .ru docs, matching `Config.base_url`.
 

@@ -108,6 +108,30 @@ class AuthManager:
                 return
             await self._do_refresh()
 
+    async def exchange_code(self, code: str) -> None:
+        """Exchange an OAuth authorization code for the first token pair and persist it.
+
+        The code is single-use and valid for 20 minutes. redirect_uri must match the
+        integration settings exactly.
+        """
+        body = {
+            "client_id": self._config.client_id,
+            "client_secret": self._config.client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": self._config.redirect_uri,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(self._config.token_url, json=body)
+        if response.status_code != 200:
+            raise AuthError(
+                f"Authorization code exchange failed ({response.status_code}): {response.text[:300]}"
+            )
+        data = response.json()
+        self._access_token = data["access_token"]
+        self._refresh_token_value = data["refresh_token"]
+        self._persist_tokens()
+
     async def _do_refresh(self) -> None:
         url = self._config.token_url
         body = {

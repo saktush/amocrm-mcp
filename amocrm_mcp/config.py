@@ -16,7 +16,10 @@ class Config(BaseSettings):
     subdomain: str = Field(description="amoCRM account subdomain")
     client_id: str = Field(default="", description="OAuth client ID")
     client_secret: str = Field(default="", description="OAuth client secret")
-    access_token: str = Field(description="Initial OAuth access token")
+    access_token: str = Field(
+        default="",
+        description="Initial OAuth access token (may be empty when tokens come from the token file; see amocrm-mcp-auth)",
+    )
     refresh_token: str = Field(default="", description="Initial OAuth refresh token")
     token_file: str = Field(
         default=".amo_tokens.json",

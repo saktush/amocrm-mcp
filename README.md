@@ -40,6 +40,17 @@ Optional platform settings (used for API calls and token refresh):
 - `AMO_BASE_DOMAIN` — `amocrm.ru` (default), `amocrm.com` or `kommo.com`
 - `AMO_REDIRECT_URI` — OAuth redirect URI, default `https://localhost`; must match your integration settings exactly
 
+### Getting the first token pair (OAuth bootstrap)
+
+A refresh token is only issued by the OAuth code exchange (long-lived tokens have none). Set `AMO_SUBDOMAIN`, `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET` (integration ID and secret key from **Settings → Integrations → your integration → Keys and access**) and `AMO_REDIRECT_URI` (exactly as registered in the integration), then run one of:
+
+```bash
+amocrm-mcp-auth --code <authorization code>   # code from the "Keys and access" tab, valid 20 minutes, single use
+amocrm-mcp-auth                               # opens the consent page and catches the redirect on a local http://localhost:<port>/ redirect URI
+```
+
+Add `--env-file dev.env` to use another env file. Tokens are written to `AMO_TOKEN_FILE` and never printed; the server then refreshes them automatically.
+
 ### 3. Run
 
 **On your local machine**, from the repo root with the venv active:

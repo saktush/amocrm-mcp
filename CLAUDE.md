@@ -15,6 +15,7 @@ AMO_TRANSPORT=http AMO_PORT=8000 python -m amocrm_mcp   # Streamable HTTP at /mc
 pip install -e '.[dev]'               # test deps (pytest, pytest-asyncio, respx)
 .venv/bin/python -m pytest -q         # run all tests (no network, no real .env)
 .venv/bin/python -m pytest tests/test_p1.py::test_leads_list_order -q   # single test
+amocrm-mcp-auth --code <code>        # one-time OAuth bootstrap: writes tokens to AMO_TOKEN_FILE (see README)
 docker compose up --build             # containerized HTTP deployment (see README-deploy.md)
 ```
 

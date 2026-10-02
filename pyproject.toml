@@ -39,6 +39,7 @@ Issues = "https://github.com/cAIborg-ai/amocrm-mcp/issues"
 
 [project.scripts]
 amocrm-mcp = "amocrm_mcp.server:main"
+amocrm-mcp-auth = "amocrm_mcp.auth_setup:main"
 
 [tool.setuptools.packages.find]
 include = ["amocrm_mcp*"]

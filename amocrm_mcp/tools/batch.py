@@ -1,6 +1,6 @@
 """Batch MCP tools: create_leads, update_leads, create_contacts (FR-17, FR-25).
 
-Max 50 items per call (C-3). Prevalidation rejects oversized payloads before
+Max items per call: AMO_MAX_BATCH_SIZE (default 50, hard cap 250) (C-3). Prevalidation rejects oversized payloads before
 any API call. Responses include per-item results with successes and failures.
 """
 
@@ -17,7 +17,7 @@ from amocrm_mcp.server import execute_tool, mcp
 
 @mcp.tool()
 async def batch_create_leads(input: BatchCreateLeadsInput) -> dict:
-    """Create multiple leads in a single API call (max 50).
+    """Create multiple leads in a single API call (max AMO_MAX_BATCH_SIZE, default 50).
 
     Each item is a lead object with optional fields: name, price, status_id,
     pipeline_id, responsible_user_id, custom_fields_values.
@@ -36,7 +36,7 @@ async def batch_create_leads(input: BatchCreateLeadsInput) -> dict:
 
 @mcp.tool()
 async def batch_update_leads(input: BatchUpdateLeadsInput) -> dict:
-    """Update multiple leads in a single API call (max 50).
+    """Update multiple leads in a single API call (max AMO_MAX_BATCH_SIZE, default 50).
 
     Each item must include an 'id' field plus fields to update: name, price,
     status_id, pipeline_id, responsible_user_id, custom_fields_values.
@@ -55,7 +55,7 @@ async def batch_update_leads(input: BatchUpdateLeadsInput) -> dict:
 
 @mcp.tool()
 async def batch_create_contacts(input: BatchCreateContactsInput) -> dict:
-    """Create multiple contacts in a single API call (max 50).
+    """Create multiple contacts in a single API call (max AMO_MAX_BATCH_SIZE, default 50).
 
     Each item is a contact object with optional fields: name, first_name,
     last_name, responsible_user_id, custom_fields_values.

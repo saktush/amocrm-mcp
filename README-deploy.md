@@ -18,9 +18,15 @@ cp .env.example .env
 Edit `.env` and fill in at minimum:
 
 - `AMO_SUBDOMAIN` — your amoCRM account subdomain
-- `AMO_ACCESS_TOKEN` — OAuth access token
+- `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REDIRECT_URI` — from the integration's **Keys and access** tab (the redirect URI must match the integration exactly)
 
-For automatic token refresh, also set `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REFRESH_TOKEN`.
+Then get the first token pair once, writing it into the persistent volume (use the authorization code from the **Keys and access** tab, valid 20 minutes, single use):
+
+```bash
+docker compose run --rm amocrm-mcp amocrm-mcp-auth --code <authorization code>
+```
+
+The tokens land in `/data/.amo_tokens.json` (the `amo_tokens` volume) and are refreshed automatically afterwards. Alternatively, skip this and set a long-lived `AMO_ACCESS_TOKEN` (it will never refresh).
 
 > Note: `docker-compose.yml` always runs the container in `http` (Streamable HTTP) transport mode regardless of what `AMO_TRANSPORT` is set to in `.env` — this is required for the container to be reachable over the network at all.
 
@@ -47,10 +53,13 @@ amoCRM MCP server started with 36 tools on http transport
 | Variable | Required? | Default | Notes |
 |---|---|---|---|
 | `AMO_SUBDOMAIN` | **Yes** | — | amoCRM account subdomain. Missing this crashes the container at startup. |
-| `AMO_ACCESS_TOKEN` | **Yes** | — | Initial OAuth access token (seed). Missing this crashes the container at startup. |
-| `AMO_CLIENT_ID` | For auto-refresh | `""` | OAuth client ID |
-| `AMO_CLIENT_SECRET` | For auto-refresh | `""` | OAuth client secret |
-| `AMO_REFRESH_TOKEN` | For auto-refresh | `""` | OAuth refresh token (seed) |
+| `AMO_ACCESS_TOKEN` | If no token file | `""` | Initial access token (seed). Not needed once `amocrm-mcp-auth` has written `/data/.amo_tokens.json`. |
+| `AMO_CLIENT_ID` | For OAuth / auto-refresh | `""` | OAuth client ID |
+| `AMO_CLIENT_SECRET` | For OAuth / auto-refresh | `""` | OAuth client secret |
+| `AMO_REFRESH_TOKEN` | No | `""` | Refresh token seed; normally created by `amocrm-mcp-auth` instead |
+| `AMO_BASE_DOMAIN` | No | `amocrm.ru` | Platform domain (`amocrm.ru`, `amocrm.com` or `kommo.com`). Used for both API calls (`https://<subdomain>.<domain>`) and OAuth token refresh. |
+| `AMO_REDIRECT_URI` | No | `https://localhost` | OAuth redirect URI used on token refresh; must match the integration settings exactly. |
+| `AMO_MAX_BATCH_SIZE` | No | `50` | Max items per `batch_*` call; values above the amoCRM limit of `250` are clamped to `250`. |
 | `AMO_TOKEN_FILE` | No | Fixed to `/data/.amo_tokens.json` by Docker setup | Where refreshed tokens are persisted. Overridable, but must point inside `/data` to survive container recreation. |
 | `AMO_TRANSPORT` | No | Fixed to `http` by Docker setup | Streamable HTTP (modern standard, required by Codex). `sse` (legacy) is also available — see [Advanced: stdio](#advanced-stdio-inside-a-container-discouraged) for how to override. |
 | `AMO_PORT` | No | `8000` | Also controls the published host port (`docker-compose.yml` maps `${AMO_PORT}:${AMO_PORT}`). |
@@ -124,7 +133,7 @@ Either way, connect the client to `http://<host>:8000/sse` instead of `/mcp`. SS
 
 ## Persistent Token Storage
 
-Refreshed OAuth tokens are written to `/data/.amo_tokens.json` inside the container, which is backed by the `amo_tokens` named Docker volume declared in `docker-compose.yml`. This is what lets refreshed tokens survive container restarts/recreation — without it, the server would fall back to the (possibly stale) env-seeded `AMO_ACCESS_TOKEN` every time the container is recreated.
+Refreshed OAuth tokens are written to `/data/.amo_tokens.json` inside the container, which is backed by the `amo_tokens` named Docker volume declared in `docker-compose.yml`. This is what lets refreshed tokens survive container restarts/recreation — without it, the server would fall back to the (possibly stale) env-seeded tokens every time the container is recreated (and a rotated, single-use refresh token would be lost).
 
 To inspect the persisted token file:
 
@@ -177,7 +186,7 @@ For local desktop-client use (Claude Desktop, Cursor, etc.), prefer the native `
 
 ## Troubleshooting
 
-- **Container exits immediately, logs show a pydantic `ValidationError` mentioning `subdomain` or `access_token`** — `AMO_SUBDOMAIN`/`AMO_ACCESS_TOKEN` are missing from `.env`, or `docker compose` was run from a directory where `.env` isn't next to `docker-compose.yml`.
+- **Container exits immediately, logs show a pydantic `ValidationError` mentioning `subdomain` or `access_token`** — `AMO_SUBDOMAIN` is missing from `.env`, or `docker compose` was run from a directory where `.env` isn't next to `docker-compose.yml`.
 - **`docker compose ps` shows `unhealthy`** — expected/cosmetic if you've overridden `AMO_TRANSPORT=stdio` (the healthcheck probes the HTTP port, which isn't bound in stdio mode). Plain Docker does not restart containers based on health status alone.
 - **Codex reports it can't connect / only stdio and Streamable HTTP are supported** — make sure you're using the default `AMO_TRANSPORT=http` (not `sse`) and the URL ends in `/mcp`, not `/sse`. Codex does not support the legacy SSE transport at all.
 - **MCP client reports "connection refused"** — check `docker compose ps` shows `Up`, confirm the published port matches `AMO_PORT`, and check the host firewall.

@@ -7,8 +7,6 @@ analytics_get_pipeline_analytics: computed aggregation grouped by status_id and 
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from amocrm_mcp.client import AmoAPIError, build_filters, error_response, success_response
 from amocrm_mcp.models.schemas import (
     AnalyticsGetEventsInput,
@@ -25,7 +23,8 @@ async def analytics_get_events(input: AnalyticsGetEventsInput) -> dict:
     Supports filtering by entity type (lead, contact, company, customer, task),
     entity ID, date range (unix timestamps), and event types.
     Event entity_type uses singular form (lead, not leads).
-    entity_id requires entity_type to be set.
+    entity_id requires entity_type to be set. limit is capped at 100
+    (default 100), the maximum amoCRM allows for events.
 
     Filter encoding verified against live amoCRM API:
     - filter[entity][] for entity type
@@ -67,6 +66,11 @@ async def leads_create_complex(input: ComplexLeadInput) -> dict:
     Posts to /api/v4/leads/complex for atomic creation. Constraints enforced
     via Pydantic validation: max 1 contact, max 1 company, max 40 custom fields
     per entity.
+
+    Returns the created lead item with id and, when present in the API response,
+    contact_id, company_id and merged (true when duplicate control merged the
+    contact/company into an existing one) and request_id. Only a single lead is
+    sent per call.
     """
 
     async def _execute(client):
@@ -83,7 +87,7 @@ async def leads_create_complex(input: ComplexLeadInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         if input.contacts is not None:
             payload["_embedded"] = payload.get("_embedded", {})
@@ -98,7 +102,13 @@ async def leads_create_complex(input: ComplexLeadInput) -> dict:
         data = await client.request(
             "POST", "/api/v4/leads/complex", json_data=[payload],
         )
-        return success_response(data)
+        item = data[0] if isinstance(data, list) and len(data) == 1 else data
+        if isinstance(item, dict):
+            keys = ("id", "contact_id", "company_id", "merged", "request_id")
+            surfaced = {k: item[k] for k in keys if k in item}
+            if surfaced:
+                item = surfaced
+        return success_response(item)
 
     return await execute_tool(_execute)
 
@@ -112,13 +122,18 @@ async def analytics_get_pipeline_analytics(
     This is a computed aggregation, not a native amoCRM analytics endpoint.
     Internally fetches all leads for the specified pipeline and date range
     (paginating as needed), then groups and counts by status_id and
-    responsible_user_id. Latency scales with lead count (~4s per 250 leads).
+    responsible_user_id. Each group has count and sum_price. Closed leads are
+    included with open ones. Fetching stops at max_leads (default 10000); then
+    pagination.truncated is true and only the first max_leads leads are aggregated.
+    Latency scales with lead count (~4s per 250 leads).
     """
 
     async def _execute(client):
         all_leads: list[dict] = []
         page = 1
         has_next = True
+
+        truncated = False
 
         while has_next:
             params: dict = {
@@ -141,22 +156,27 @@ async def analytics_get_pipeline_analytics(
             all_leads.extend(leads)
             has_next = data.get("_has_next", False) if isinstance(data, dict) else False
             page += 1
+            if len(all_leads) >= input.max_leads:
+                truncated = has_next or len(all_leads) > input.max_leads
+                del all_leads[input.max_leads:]
+                break
 
-        groups: dict[str, int] = defaultdict(int)
+        groups: dict[tuple[int, int], dict[str, int]] = {}
         for lead in all_leads:
-            status_id = lead.get("status_id", 0)
-            responsible_user_id = lead.get("responsible_user_id", 0)
-            key = f"{status_id}:{responsible_user_id}"
-            groups[key] += 1
+            key = (lead.get("status_id", 0), lead.get("responsible_user_id", 0))
+            group = groups.setdefault(key, {"count": 0, "sum_price": 0})
+            group["count"] += 1
+            group["sum_price"] += lead.get("price") or 0
 
-        aggregated = []
-        for key, count in groups.items():
-            sid, ruid = key.split(":")
-            aggregated.append({
-                "status_id": int(sid),
-                "responsible_user_id": int(ruid),
-                "count": count,
-            })
+        aggregated = [
+            {
+                "status_id": sid,
+                "responsible_user_id": ruid,
+                "count": g["count"],
+                "sum_price": g["sum_price"],
+            }
+            for (sid, ruid), g in groups.items()
+        ]
 
         return success_response(
             aggregated,
@@ -164,6 +184,7 @@ async def analytics_get_pipeline_analytics(
                 "pipeline_id": input.pipeline_id,
                 "total_leads": len(all_leads),
                 "pages_fetched": page - 1,
+                "truncated": truncated,
             },
         )
 

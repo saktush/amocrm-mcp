@@ -79,6 +79,10 @@ async def _async_main() -> None:
     from amocrm_mcp.config import Config
 
     config = Config()
+
+    from amocrm_mcp.models.schemas import configure_max_batch_size
+
+    configure_max_batch_size(config.max_batch_size)
     logger.info("Configuration loaded for subdomain: %s", config.subdomain)
 
     from amocrm_mcp.auth import AuthManager

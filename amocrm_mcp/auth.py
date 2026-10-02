@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -30,6 +31,9 @@ class AuthManager:
     Manages access/refresh tokens with disk persistence and automatic refresh.
     The token file on disk is the canonical source of truth for tokens.
     Environment variables serve only as the initial seed.
+
+    Two modes: OAuth (a refresh token plus client ID/secret exist, so a 401 triggers a
+    refresh) and long-lived (no refresh token: a 401 is reported, never refreshed).
     """
 
     def __init__(self, config: Config) -> None:
@@ -37,7 +41,27 @@ class AuthManager:
         self._access_token: str = config.access_token
         self._refresh_token_value: str = config.refresh_token
         self._token_file = Path(config.token_file)
+        self._refresh_lock = asyncio.Lock()
+        self.token_source = "env"
         self._load_persisted_tokens()
+        self._log_mode(config.access_token)
+
+    @property
+    def can_refresh(self) -> bool:
+        """True when a refresh token and client credentials are available."""
+        return bool(
+            self._refresh_token_value and self._config.client_id and self._config.client_secret
+        )
+
+    def _log_mode(self, env_access_token: str) -> None:
+        mode = "OAuth (auto-refresh)" if self.can_refresh else "static/long-lived (no refresh)"
+        logger.info("Auth: tokens from %s, mode: %s", self.token_source, mode)
+        if self.token_source == "token file" and env_access_token and env_access_token != self._access_token:
+            logger.warning(
+                "AMO_ACCESS_TOKEN is set but token file %s takes precedence and is being used; "
+                "remove AMO_ACCESS_TOKEN or delete the file to use the env token",
+                self._token_file,
+            )
 
     def _load_persisted_tokens(self) -> None:
         """Load tokens from disk if the file exists and contains valid JSON.
@@ -54,6 +78,7 @@ class AuthManager:
             if access and refresh:
                 self._access_token = access
                 self._refresh_token_value = refresh
+                self.token_source = "token file"
                 logger.info("Loaded persisted tokens from %s", self._token_file)
             else:
                 logger.warning("Token file %s missing required fields, using env seed", self._token_file)
@@ -90,19 +115,60 @@ class AuthManager:
         """Return the current access token."""
         return self._access_token
 
-    async def refresh_token(self) -> None:
+    async def refresh_token(self, stale_token: str | None = None) -> None:
         """Refresh the access token via POST /oauth2/access_token (FR-2, FR-4).
+
+        Serialized by a lock: the refresh token is single-use, so concurrent 401s
+        must refresh exactly once. If stale_token (the token that got the 401) no
+        longer matches the current one, another caller already refreshed; skip.
 
         On success, persists new tokens to disk.
         On invalid_grant (expired refresh token), raises RefreshTokenExpiredError.
         """
-        url = f"https://{self._config.subdomain}.kommo.com/oauth2/access_token"
+        if not self.can_refresh:
+            raise AuthError(
+                "Access token was rejected (401) and cannot be refreshed: no refresh token or client "
+                "credentials are configured (long-lived token mode). Replace the token, or set "
+                "AMO_CLIENT_ID/AMO_CLIENT_SECRET and run amocrm-mcp-auth."
+            )
+        async with self._refresh_lock:
+            if stale_token is not None and stale_token != self._access_token:
+                logger.info("Token already refreshed by a concurrent request, skipping")
+                return
+            await self._do_refresh()
+
+    async def exchange_code(self, code: str) -> None:
+        """Exchange an OAuth authorization code for the first token pair and persist it.
+
+        The code is single-use and valid for 20 minutes. redirect_uri must match the
+        integration settings exactly.
+        """
+        body = {
+            "client_id": self._config.client_id,
+            "client_secret": self._config.client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": self._config.redirect_uri,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(self._config.token_url, json=body)
+        if response.status_code != 200:
+            raise AuthError(
+                f"Authorization code exchange failed ({response.status_code}): {response.text[:300]}"
+            )
+        data = response.json()
+        self._access_token = data["access_token"]
+        self._refresh_token_value = data["refresh_token"]
+        self._persist_tokens()
+
+    async def _do_refresh(self) -> None:
+        url = self._config.token_url
         body = {
             "client_id": self._config.client_id,
             "client_secret": self._config.client_secret,
             "grant_type": "refresh_token",
             "refresh_token": self._refresh_token_value,
-            "redirect_uri": "https://localhost",
+            "redirect_uri": self._config.redirect_uri,
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:

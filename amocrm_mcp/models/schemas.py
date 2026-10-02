@@ -2,24 +2,51 @@
 
 Validation-first: malformed input fails before any network call to amoCRM.
 Constraints enforced:
-- Batch operations: max 50 items per call (C-3)
+- Batch operations: max AMO_MAX_BATCH_SIZE items per call, default 50 (C-3)
 - Pagination: limit max 250 (C-2)
 - Complex lead: max 1 contact, max 1 company, max 40 custom fields per entity (C-4)
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-MAX_BATCH_SIZE = 50
+BATCH_SIZE_HARD_CAP = 250
+
+
+def resolve_max_batch_size(env: dict[str, str] | None = None) -> int:
+    """Batch size cap: AMO_MAX_BATCH_SIZE (default 50, clamped to 1..250)."""
+    raw = (env if env is not None else os.environ).get("AMO_MAX_BATCH_SIZE")
+    if not raw:
+        return 50
+    try:
+        value = int(raw)
+    except ValueError:
+        return 50
+    return max(1, min(value, BATCH_SIZE_HARD_CAP))
+
+
+MAX_BATCH_SIZE = resolve_max_batch_size()
+
+
+def configure_max_batch_size(value: int) -> None:
+    """Set the batch cap at runtime (server startup passes Config.max_batch_size).
+
+    Batch validators read the module global at validation time.
+    """
+    global MAX_BATCH_SIZE
+    MAX_BATCH_SIZE = max(1, min(value, BATCH_SIZE_HARD_CAP))
 MAX_PAGE_LIMIT = 250
 MAX_CUSTOM_FIELDS_PER_ENTITY = 40
+MAX_EVENTS_PAGE_LIMIT = 100
 
 ENTITY_TYPES_FOR_NOTES = ("leads", "contacts", "companies", "customers")
 ENTITY_TYPES_FOR_EVENTS = ("lead", "contact", "company", "customer", "task")
 LINKABLE_ENTITY_TYPES = ("leads", "contacts", "companies", "customers")
+LINK_TARGET_ENTITY_TYPES = (*LINKABLE_ENTITY_TYPES, "catalog_elements")
 
 
 # ---------------------------------------------------------------------------
@@ -40,10 +67,38 @@ class PaginationMixin(BaseModel):
 
 
 class CustomFieldInput(BaseModel):
-    """Custom field value for create/update payloads."""
+    """Custom field value for create/update payloads.
 
-    field_id: int
+    Identify the field by exactly one of field_id or field_code (system fields
+    such as PHONE and EMAIL are normally addressed by field_code).
+    values is a list of value objects whose shape depends on the field type:
+    - text/numeric/url/date etc.: [{"value": "..."}]
+    - multitext (PHONE, EMAIL): [{"value": "+123", "enum_code": "WORK"}] (or "enum_id")
+    - select/radiobutton: [{"enum_id": 123}] (or {"value": "..."})
+    - multiselect: [{"enum_id": 1}, {"enum_id": 2}]
+    - checkbox: [{"value": true}]
+    None values inside the values dicts are stripped from the payload (exclude_none).
+    """
+
+    field_id: int | None = Field(default=None, description="Custom field ID")
+    field_code: str | None = Field(
+        default=None, description="Custom field code (e.g. PHONE, EMAIL)"
+    )
     values: list[dict[str, Any]]
+
+    @model_validator(mode="after")
+    def validate_field_identifier(self) -> CustomFieldInput:
+        if (self.field_id is None) == (self.field_code is None):
+            msg = "Exactly one of field_id or field_code is required"
+            raise ValueError(msg)
+        return self
+
+
+class LeadStatusFilter(BaseModel):
+    """One (pipeline_id, status_id) pair for the leads status filter."""
+
+    pipeline_id: int = Field(description="Pipeline ID the status belongs to")
+    status_id: int = Field(description="Status ID")
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +116,16 @@ class LeadsListInput(PaginationMixin):
     responsible_user_id: list[int] | None = Field(
         default=None, description="Filter by responsible user IDs"
     )
+    statuses: list[LeadStatusFilter] | None = Field(
+        default=None,
+        description="Filter by (pipeline_id, status_id) pairs; amoCRM requires both IDs",
+    )
     status_id: list[int] | None = Field(
-        default=None, description="Filter by status IDs"
+        default=None,
+        description=(
+            "DEPRECATED, use statuses. Filter by status IDs; requires exactly one "
+            "pipeline_id, and is translated into statuses pairs"
+        ),
     )
     pipeline_id: list[int] | None = Field(
         default=None, description="Filter by pipeline IDs"
@@ -88,12 +151,36 @@ class LeadsListInput(PaginationMixin):
     query: str | None = Field(
         default=None, description="Search query string"
     )
-    order_field: str | None = Field(
-        default=None, description="Order by field (created_at, updated_at, id)"
+    order_field: Literal["created_at", "updated_at", "id"] | None = Field(
+        default=None, description="Order by field (sent as order[<field>]=<direction>)"
     )
     order_direction: Literal["asc", "desc"] | None = Field(
-        default=None, description="Order direction"
+        default=None, description="Order direction (default asc when order_field is set)"
     )
+
+    @model_validator(mode="after")
+    def validate_status_id_needs_pipeline(self) -> LeadsListInput:
+        if self.order_direction and not self.order_field:
+            msg = "order_direction requires order_field"
+            raise ValueError(msg)
+        self.effective_statuses()
+        return self
+
+    def effective_statuses(self) -> list[LeadStatusFilter]:
+        """Return statuses pairs, translating the deprecated bare status_id."""
+        result = list(self.statuses or [])
+        if self.status_id:
+            if not self.pipeline_id or len(self.pipeline_id) != 1:
+                msg = (
+                    "status_id requires exactly one pipeline_id because amoCRM filters "
+                    "statuses by (pipeline_id, status_id) pairs; use 'statuses' instead"
+                )
+                raise ValueError(msg)
+            result.extend(
+                LeadStatusFilter(pipeline_id=self.pipeline_id[0], status_id=sid)
+                for sid in self.status_id
+            )
+        return result
 
 
 class LeadsGetInput(BaseModel):
@@ -452,18 +539,30 @@ class AssociationsLinkEntitiesInput(BaseModel):
     )
     entity_id: int = Field(description="Source entity ID")
     to_entity_type: str = Field(
-        description="Target entity type (leads, contacts, companies, customers)"
+        description="Target entity type (leads, contacts, companies, customers, catalog_elements)"
     )
     to_entity_id: int = Field(description="Target entity ID")
     metadata: dict[str, Any] | None = Field(
-        default=None, description="Link metadata (e.g., is_main for contacts)"
+        default=None,
+        description=(
+            "Link metadata (e.g., is_main for contacts; catalog_id and quantity "
+            "for catalog_elements)"
+        ),
     )
 
-    @field_validator("entity_type", "to_entity_type")
+    @field_validator("entity_type")
     @classmethod
     def validate_entity_type(cls, v: str) -> str:
         if v not in LINKABLE_ENTITY_TYPES:
             msg = f"entity_type must be one of {LINKABLE_ENTITY_TYPES}, got '{v}'"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("to_entity_type")
+    @classmethod
+    def validate_to_entity_type(cls, v: str) -> str:
+        if v not in LINK_TARGET_ENTITY_TYPES:
+            msg = f"to_entity_type must be one of {LINK_TARGET_ENTITY_TYPES}, got '{v}'"
             raise ValueError(msg)
         return v
 
@@ -512,15 +611,15 @@ class AccountListCustomFieldsInput(PaginationMixin):
 
 
 # ---------------------------------------------------------------------------
-# Batch (3 tools) - max 50 items per call (C-3)
+# Batch (3 tools) - max AMO_MAX_BATCH_SIZE items per call, default 50 (C-3)
 # ---------------------------------------------------------------------------
 
 
 class BatchCreateLeadsInput(BaseModel):
-    """Input for batch_create_leads tool. Max 50 items per call (C-3)."""
+    """Input for batch_create_leads tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
-        description="Array of lead objects to create (max 50)",
+        description="Array of lead objects to create (max AMO_MAX_BATCH_SIZE, default 50)",
     )
 
     @field_validator("items")
@@ -536,10 +635,10 @@ class BatchCreateLeadsInput(BaseModel):
 
 
 class BatchUpdateLeadsInput(BaseModel):
-    """Input for batch_update_leads tool. Max 50 items per call (C-3)."""
+    """Input for batch_update_leads tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
-        description="Array of lead objects to update (max 50), each must include 'id'",
+        description="Array of lead objects to update (max AMO_MAX_BATCH_SIZE, default 50), each must include 'id'",
     )
 
     @field_validator("items")
@@ -555,10 +654,10 @@ class BatchUpdateLeadsInput(BaseModel):
 
 
 class BatchCreateContactsInput(BaseModel):
-    """Input for batch_create_contacts tool. Max 50 items per call (C-3)."""
+    """Input for batch_create_contacts tool. Max items per call: AMO_MAX_BATCH_SIZE, default 50 (C-3)."""
 
     items: list[dict[str, Any]] = Field(
-        description="Array of contact objects to create (max 50)",
+        description="Array of contact objects to create (max AMO_MAX_BATCH_SIZE, default 50)",
     )
 
     @field_validator("items")
@@ -581,12 +680,20 @@ class BatchCreateContactsInput(BaseModel):
 class UnsortedListInput(PaginationMixin):
     """Input for unsorted_list tool."""
 
-    order_by: str | None = Field(
-        default=None, description="Order by field"
+    order_by: Literal["created_at", "updated_at"] | None = Field(
+        default=None,
+        description="Order by field (sent as order[<field>]=<direction>)",
     )
     order_direction: Literal["asc", "desc"] | None = Field(
-        default=None, description="Order direction"
+        default=None, description="Order direction (default asc when order_by is set)"
     )
+
+    @model_validator(mode="after")
+    def validate_direction_needs_field(self) -> UnsortedListInput:
+        if self.order_direction and not self.order_by:
+            msg = "order_direction requires order_by"
+            raise ValueError(msg)
+        return self
 
 
 class UnsortedAcceptInput(BaseModel):
@@ -599,15 +706,17 @@ class UnsortedAcceptInput(BaseModel):
     status_id: int | None = Field(
         default=None, description="Pipeline status ID to place the lead in"
     )
-    pipeline_id: int | None = Field(
-        default=None, description="Pipeline ID to place the lead in"
-    )
+    # pipeline_id was removed: the accept endpoint only takes user_id and status_id
+    # (the status already determines the pipeline). Extra input keys are ignored.
 
 
 class UnsortedRejectInput(BaseModel):
     """Input for unsorted_reject tool."""
 
     uid: str = Field(description="Unsorted lead UID")
+    user_id: int | None = Field(
+        default=None, description="User ID on whose behalf the lead is declined"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +727,12 @@ class UnsortedRejectInput(BaseModel):
 class AnalyticsGetEventsInput(PaginationMixin):
     """Input for analytics_get_events tool."""
 
+    limit: int = Field(
+        default=100,
+        ge=1,
+        le=MAX_EVENTS_PAGE_LIMIT,
+        description="Items per page (max 100 for events)",
+    )
     entity_type: str | None = Field(
         default=None,
         description="Filter by entity type (lead, contact, company, customer, task)",
@@ -756,4 +871,9 @@ class AnalyticsGetPipelineAnalyticsInput(BaseModel):
     )
     created_at_to: int | None = Field(
         default=None, description="Filter leads created to (unix timestamp)"
+    )
+    max_leads: int = Field(
+        default=10000,
+        ge=1,
+        description="Stop fetching after this many leads (result is flagged truncated)",
     )

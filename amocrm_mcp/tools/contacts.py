@@ -28,7 +28,7 @@ async def contacts_create(input: ContactsCreateInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         data = await client.request(
             "POST", "/api/v4/contacts", json_data=[payload],
@@ -53,6 +53,8 @@ async def contacts_get(input: ContactsGetInput) -> dict:
         data = await client.request(
             "GET", f"/api/v4/contacts/{input.id}", params=params or None,
         )
+        if not data:
+            return error_response("Resource not found", 404, f"No contact with id {input.id} (amoCRM returned 204).")
         return success_response(data)
 
     return await execute_tool(_execute)
@@ -95,7 +97,7 @@ async def contacts_update(input: ContactsUpdateInput) -> dict:
             payload["responsible_user_id"] = input.responsible_user_id
         if input.custom_fields_values is not None:
             payload["custom_fields_values"] = [
-                cf.model_dump() for cf in input.custom_fields_values
+                cf.model_dump(exclude_none=True) for cf in input.custom_fields_values
             ]
         data = await client.request(
             "PATCH", "/api/v4/contacts", json_data=[payload],

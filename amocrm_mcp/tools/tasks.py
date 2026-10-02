@@ -47,6 +47,8 @@ async def tasks_get(input: TasksGetInput) -> dict:
 
     async def _execute(client):
         data = await client.request("GET", f"/api/v4/tasks/{input.id}")
+        if not data:
+            return error_response("Resource not found", 404, f"No task with id {input.id} (amoCRM returned 204).")
         return success_response(data)
 
     return await execute_tool(_execute)
@@ -57,7 +59,7 @@ async def tasks_list(input: TasksListInput) -> dict:
     """List tasks with optional filters and pagination.
 
     Supports filtering by entity_type, entity_id, responsible_user_id,
-    and completion status.
+    and completion status (sent as 1/0).
     """
 
     async def _execute(client):
@@ -69,10 +71,11 @@ async def tasks_list(input: TasksListInput) -> dict:
             filters["entity_id"] = input.entity_id
         if input.responsible_user_id:
             filters["responsible_user_id"] = input.responsible_user_id
-        if input.is_completed is not None:
-            filters["is_completed"] = input.is_completed
         if filters:
             params.update(build_filters(filters))
+        if input.is_completed is not None:
+            # Scalar form on purpose: live API treats filter[is_completed][]=0 like "completed".
+            params["filter[is_completed]"] = 1 if input.is_completed else 0
         data = await client.request("GET", "/api/v4/tasks", params=params)
         tasks = data.get("tasks", [])
         pagination = {

@@ -29,6 +29,9 @@ dependencies = [
     "aiolimiter",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "respx"]
+
 [project.urls]
 Homepage = "https://github.com/cAIborg-ai/amocrm-mcp"
 Repository = "https://github.com/cAIborg-ai/amocrm-mcp"
@@ -36,6 +39,11 @@ Issues = "https://github.com/cAIborg-ai/amocrm-mcp/issues"
 
 [project.scripts]
 amocrm-mcp = "amocrm_mcp.server:main"
+amocrm-mcp-auth = "amocrm_mcp.auth_setup:main"
 
 [tool.setuptools.packages.find]
 include = ["amocrm_mcp*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

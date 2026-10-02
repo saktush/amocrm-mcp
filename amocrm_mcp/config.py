@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -16,7 +16,10 @@ class Config(BaseSettings):
     subdomain: str = Field(description="amoCRM account subdomain")
     client_id: str = Field(default="", description="OAuth client ID")
     client_secret: str = Field(default="", description="OAuth client secret")
-    access_token: str = Field(description="Initial OAuth access token")
+    access_token: str = Field(
+        default="",
+        description="Initial OAuth access token (may be empty when tokens come from the token file; see amocrm-mcp-auth)",
+    )
     refresh_token: str = Field(default="", description="Initial OAuth refresh token")
     token_file: str = Field(
         default=".amo_tokens.json",
@@ -27,7 +30,29 @@ class Config(BaseSettings):
         description="Transport protocol: stdio, http (Streamable HTTP), or sse (legacy)",
     )
     port: int = Field(default=8000, description="Port for SSE transport")
+    base_domain: str = Field(
+        default="amocrm.ru",
+        description="Platform domain: amocrm.ru, amocrm.com or kommo.com (used for API and OAuth refresh)",
+    )
+    redirect_uri: str = Field(
+        default="https://localhost",
+        description="OAuth redirect URI; must match the integration settings exactly",
+    )
+
+    max_batch_size: int = Field(
+        default=50,
+        description="Max items per batch_* call (clamped to 1..250)",
+    )
+
+    @field_validator("max_batch_size")
+    @classmethod
+    def clamp_max_batch_size(cls, v: int) -> int:
+        return max(1, min(v, 250))
+
+    @property
+    def token_url(self) -> str:
+        return f"{self.base_url}/oauth2/access_token"
 
     @property
     def base_url(self) -> str:
-        return f"https://{self.subdomain}.amocrm.ru"
+        return f"https://{self.subdomain}.{self.base_domain}"

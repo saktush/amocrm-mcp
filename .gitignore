@@ -1,6 +1,6 @@
 # Secrets
 .env
-.amo_tokens.json
+.amo_tokens*.json
 
 # Python
 __pycache__/
@@ -18,3 +18,4 @@ build/
 
 # OS
 .DS_Store
+.pytest_cache/

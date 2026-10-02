@@ -83,6 +83,8 @@ async def leads_get(input: LeadsGetInput) -> dict:
         data = await client.request(
             "GET", f"/api/v4/leads/{input.id}", params=params or None,
         )
+        if not data:
+            return error_response("Resource not found", 404, f"No lead with id {input.id} (amoCRM returned 204).")
         return success_response(data)
 
     return await execute_tool(_execute)

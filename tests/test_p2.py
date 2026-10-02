@@ -295,3 +295,13 @@ def test_env_example_loads_via_config(tmp_path, monkeypatch):
     assert cfg.base_domain == "amocrm.ru"
     env_file.write_text(example.read_text().replace("AMO_MAX_BATCH_SIZE=50", "AMO_MAX_BATCH_SIZE=999"))
     assert Config(_env_file=str(env_file)).max_batch_size == 250
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("leads_get", {"id": 1}), ("contacts_get", {"id": 1}), ("companies_get", {"id": 1}),
+    ("tasks_get", {"id": 1}), ("pipelines_get", {"pipeline_id": 1}),
+])
+async def test_get_by_id_204_is_not_found(tool, args, call_tool, recorder):
+    recorder.responses.append(httpx.Response(204))
+    r = await call_tool(tool, **args)
+    assert r["status_code"] == 404 and r["error"] == "Resource not found"

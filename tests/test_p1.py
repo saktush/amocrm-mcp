@@ -230,7 +230,8 @@ def test_leads_create_input_accepts_code_fields():
 async def test_tasks_list_is_completed(call_tool, recorder, flag, expected):
     await call_tool("tasks_list", is_completed=flag)
     q = query(recorder.last)
-    assert ("filter[is_completed][]", expected) in q
+    assert ("filter[is_completed]", expected) in q
+    assert ("filter[is_completed][]", expected) not in q
 
 
 # ---- registration ------------------------------------------------------------

@@ -34,6 +34,8 @@ async def pipelines_get(input: PipelinesGetInput) -> dict:
         data = await client.request(
             "GET", f"/api/v4/leads/pipelines/{input.pipeline_id}",
         )
+        if not data:
+            return error_response("Resource not found", 404, f"No pipeline with id {input.pipeline_id} (amoCRM returned 204).")
         return success_response(data)
 
     return await execute_tool(_execute)

@@ -95,3 +95,13 @@ Ordered by likely usefulness. Every area below appears in the official API index
 - No live API calls. Anything labelled **Likely** needs a quick check against a real account (a test account is fine).
 - The rate-limit page was read in full, but the error-codes page and the individual companies, catalogs, customers and loss-reasons pages were not fetched. Their details above come from the platform index or from general knowledge of the API and should be confirmed before they are built on.
 - The amoCRM docs split into amocrm.ru and amocrm.com/kommo.com variants. This audit used the .ru docs, matching `Config.base_url`.
+
+## 7. Live verification (dev account, 2026-10-02)
+
+The P1/P2 fixes were exercised against a dev account with read and write calls (38 checks, all passing after the two fixes below). Findings that only a live run showed:
+
+- `filter[is_completed][]=0` returns **completed** tasks; the scalar form `filter[is_completed]=0` is correct. `tasks_list` now sends the scalar form. This corrects item #9 above, which assumed the bracket form.
+- `GET /<entity>/{id}` for a missing id answers 204, which the client turned into an empty success. The `*_get` tools now return a 404 error envelope.
+- The first status of a pipeline (type 1, "incoming") cannot be set as `status_id` on create; use a later status.
+- Confirmed live: `order[<field>]`, `filter[statuses][i][...]`, `field_code` custom fields (PHONE), complex lead response (`id`, `contact_id`, `company_id`, `merged`), batch create/update, link/get links, notes with `note_type` filter, task create/update/complete, events with `limit=100`.
+- Not exercised live: token refresh (the dev account has no refresh credentials), `unsorted_accept`/`unsorted_reject` (the unsorted inbox was empty), `catalog_elements` linking.

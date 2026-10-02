@@ -29,12 +29,9 @@ Copy `.env.example` to `.env` and fill in your amoCRM credentials:
 cp .env.example .env
 ```
 
-You need at minimum:
-- `AMO_SUBDOMAIN` — your amoCRM account subdomain
-- `AMO_ACCESS_TOKEN` — OAuth access token
-
-For automatic token refresh, also set:
-- `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REFRESH_TOKEN`
+You need at minimum `AMO_SUBDOMAIN` plus one way to authenticate:
+- **OAuth (recommended, auto-refresh):** `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET`, `AMO_REDIRECT_URI`, then run `amocrm-mcp-auth` once to obtain the tokens (see [Getting the first token pair](#getting-the-first-token-pair-oauth-bootstrap)).
+- **Long-lived token (no refresh):** `AMO_ACCESS_TOKEN`.
 
 Optional platform settings (used for API calls and token refresh):
 - `AMO_BASE_DOMAIN` — `amocrm.ru` (default), `amocrm.com` or `kommo.com`
@@ -163,8 +160,11 @@ You can also do this from the UI: **Settings → MCP → Add new global MCP serv
 
 1. Go to your amoCRM account → **Settings** → **Integrations**
 2. Create a new integration (or use an existing one)
-3. Copy the **access token**, **client ID**, and **client secret**
-4. Your subdomain is the part before `.amocrm.ru` in your account URL
+3. On the **Keys and access** tab copy the **integration ID** (`AMO_CLIENT_ID`) and **secret key** (`AMO_CLIENT_SECRET`; shown once, regenerating it revokes existing authorizations), and register the redirect URI you will use as `AMO_REDIRECT_URI`
+4. Get the tokens with `amocrm-mcp-auth` (see above). A refresh token cannot be copied from the UI; it only comes from the OAuth code exchange. A long-lived token from the same tab works too but never refreshes
+5. Your subdomain is the part before `.amocrm.ru` in your account URL
+
+Refresh tokens are single-use and expire after 3 months without use. The server rotates and persists them in `AMO_TOKEN_FILE` on every refresh, so use one token file per server instance and per account, and never share a token file between environments.
 
 ## License
 

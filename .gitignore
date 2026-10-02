@@ -1,6 +1,6 @@
 # Secrets
 .env
-.amo_tokens.json
+.amo_tokens*.json
 
 # Python
 __pycache__/

@@ -104,4 +104,5 @@ The P1/P2 fixes were exercised against a dev account with read and write calls (
 - `GET /<entity>/{id}` for a missing id answers 204, which the client turned into an empty success. The `*_get` tools now return a 404 error envelope.
 - The first status of a pipeline (type 1, "incoming") cannot be set as `status_id` on create; use a later status.
 - Confirmed live: `order[<field>]`, `filter[statuses][i][...]`, `field_code` custom fields (PHONE), complex lead response (`id`, `contact_id`, `company_id`, `merged`), batch create/update, link/get links, notes with `note_type` filter, task create/update/complete, events with `limit=100`.
-- Not exercised live: token refresh (the dev account has no refresh credentials), `unsorted_accept`/`unsorted_reject` (the unsorted inbox was empty), `catalog_elements` linking.
+- Token bootstrap and refresh, verified live on the dev account: `amocrm-mcp-auth --code` obtained the first pair; with a deliberately invalid access token, 4 concurrent requests all succeeded with exactly 1 refresh call, both tokens rotated, the new pair was persisted, and a fresh `AuthManager` loading the file worked.
+- Not exercised live: `unsorted_accept`/`unsorted_reject` (the unsorted inbox was empty), `catalog_elements` linking.
